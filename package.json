@@ -1,0 +1,15 @@
+{
+  "name": "reloj-checador",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Reloj checador NFC por sucursal — Ámbar Rojo Studios",
+  "main": "server.js",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}

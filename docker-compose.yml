@@ -1,0 +1,15 @@
+services:
+  reloj-checador:
+    build: .
+    expose:
+      - "3050"
+    environment:
+      TZ: ${TZ:-America/Mexico_City}
+      BASE_URL: ${BASE_URL:-https://checador.ambarrojostudios.cloud}
+      SUPERADMIN_USER: ${SUPERADMIN_USER:-admin}
+      SUPERADMIN_PASS: ${SUPERADMIN_PASS:-}
+    volumes:
+      - checador_data:/data
+    restart: unless-stopped
+volumes:
+  checador_data:
