@@ -1,14 +1,19 @@
 services:
   reloj-checador:
-    build: .
+    # Contexto de build remoto: se puede pegar este compose tal cual en EasyPanel
+    # sin clonar nada; Docker jala el repo y usa su Dockerfile.
+    build: https://github.com/juliodomi23/reloj-checador.git#main
     expose:
       - "3050"
     environment:
       TZ: ${TZ:-America/Mexico_City}
+      # Dominio público: el superadmin la usa para generar las URLs de las etiquetas NFC.
       BASE_URL: ${BASE_URL:-https://checador.ambarrojostudios.cloud}
       SUPERADMIN_USER: ${SUPERADMIN_USER:-admin}
+      # Obligatoria: con valor vacío o el default inseguro el servidor no arranca.
       SUPERADMIN_PASS: ${SUPERADMIN_PASS:-}
     volumes:
+      # Aquí vive checador.db (checadas + fotos). Sin esto, cada deploy borra todo.
       - checador_data:/data
     restart: unless-stopped
 volumes:
