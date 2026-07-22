@@ -4,10 +4,20 @@ const BASE_URL = (process.env.BASE_URL || 'https://checador.ambarrojostudios.clo
 
 function renderSuperadmin() {
   const body = `
-    <div class="card"><h1>Reloj Checador — Ámbar Rojo</h1><p class="muted" id="resumen">Cargando…</p></div>
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="width:44px;height:44px;border-radius:12px;background:var(--acento);flex:none;
+                    display:flex;align-items:center;justify-content:center">
+          <svg style="width:22px;height:22px" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 9h18M8 2v4M16 2v4"></path>
+          </svg>
+        </div>
+        <div><h1>Reloj Checador</h1><p class="muted" id="resumen">Cargando…</p></div>
+      </div>
+    </div>
 
     <div class="card">
-      <h2>1. Alta de empresa</h2>
+      <h2><span class="badge" style="background:var(--acento);color:#fff;margin-right:8px">1</span>Alta de empresa</h2>
       <div class="row">
         <div><label>Slug</label><input id="cslug" placeholder="taller-primo"></div>
         <div><label>Nombre</label><input id="cnom" placeholder="Taller El Primo"></div>
@@ -18,7 +28,8 @@ function renderSuperadmin() {
     </div>
 
     <div class="card">
-      <h2>2. Alta de sucursal (la URL para grabar la etiqueta)</h2>
+      <h2><span class="badge" style="background:var(--acento);color:#fff;margin-right:8px">2</span>Alta de sucursal</h2>
+      <p class="muted" style="margin-top:-8px">Genera la URL que se graba en la etiqueta NFC.</p>
       <label>Empresa</label><select id="sempresa"></select>
       <div class="row">
         <div><label>Slug sucursal</label><input id="sslug" placeholder="centro"></div>
@@ -37,21 +48,25 @@ function renderSuperadmin() {
     </div>
 
     <div class="card"><h2>Empresas</h2>
-      <table><thead><tr><th>Empresa</th><th>Slug</th><th>Sucursales</th><th>Empleados</th><th>Panel</th><th></th></tr></thead>
-      <tbody id="tabla"></tbody></table>
+      <div class="table-wrap">
+        <table><thead><tr><th>Empresa</th><th>Slug</th><th>Sucursales</th><th>Empleados</th><th>Panel</th><th></th></tr></thead>
+        <tbody id="tabla"></tbody></table>
+      </div>
     </div>`;
 
   const script = `
     const BASE=${JSON.stringify(BASE_URL)};
     const $=id=>document.getElementById(id);
-    function aviso(el,t,ok){el.className='msg show '+(ok?'ok':'bad');el.textContent=t;}
+    const ICONO_OK='<svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg>';
+    const ICONO_BAD='<svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>';
+    function aviso(el,t,ok){el.className='msg show '+(ok?'ok':'bad');el.innerHTML=(ok?ICONO_OK:ICONO_BAD)+'<span>'+t+'</span>';}
     async function api(u,o){const r=await fetch(u,{headers:{'Content-Type':'application/json'},...o});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Error '+r.status);return d;}
     let empresas=[];
     async function cargar(){
       empresas=await api('/superadmin/api/empresas');
       $('resumen').textContent=empresas.length+' empresas';
       $('sempresa').innerHTML=empresas.map(x=>'<option value="'+x.id+'">'+x.nombre+'</option>').join('');
-      $('tabla').innerHTML=empresas.map(x=>'<tr><td>'+x.nombre+'</td><td><code>'+x.slug+'</code></td><td>'+x.sucursales+'</td><td>'+x.empleados+'</td><td><a href="'+BASE+'/'+x.slug+'/panel" target="_blank">abrir</a></td><td><button style="width:auto;padding:6px 10px;margin:0;background:#B91C1C" onclick="borrarEmpresa('+x.id+',\\''+x.nombre+'\\')">Borrar</button></td></tr>').join('')||'<tr><td colspan="6" class="muted">Sin empresas</td></tr>';
+      $('tabla').innerHTML=empresas.map(x=>'<tr><td>'+x.nombre+'</td><td><code>'+x.slug+'</code></td><td>'+x.sucursales+'</td><td>'+x.empleados+'</td><td><a href="'+BASE+'/'+x.slug+'/panel" target="_blank">abrir</a></td><td><button class="btn-sm btn-danger" onclick="borrarEmpresa('+x.id+',\\''+x.nombre+'\\')">Borrar</button></td></tr>').join('')||'<tr><td colspan="6" class="muted">Sin empresas</td></tr>';
       await cargarSucursales();
     }
     async function borrarEmpresa(id,nombre){
@@ -63,7 +78,7 @@ function renderSuperadmin() {
       if(!id){$('sucursales').innerHTML='';return;}
       const emp=empresas.find(x=>String(x.id)===String(id));
       const subs=await api('/superadmin/api/empresas/'+id+'/sucursales');
-      $('sucursales').innerHTML=subs.length?('Sucursales de '+emp.nombre+':<br>'+subs.map(s=>s.nombre+': <a href="'+BASE+'/'+emp.slug+'/'+s.slug+'" target="_blank">'+BASE+'/'+emp.slug+'/'+s.slug+'</a> <button style="width:auto;padding:2px 8px;margin:0 0 0 6px;background:#B91C1C" onclick="borrarSucursal('+id+','+s.id+',\\''+s.nombre+'\\')">Borrar</button>').join('<br>')):'Sin sucursales todavía';
+      $('sucursales').innerHTML=subs.length?('Sucursales de '+emp.nombre+':<br>'+subs.map(s=>s.nombre+': <a href="'+BASE+'/'+emp.slug+'/'+s.slug+'" target="_blank">'+BASE+'/'+emp.slug+'/'+s.slug+'</a> <button class="btn-sm btn-danger" style="margin-left:6px" onclick="borrarSucursal('+id+','+s.id+',\\''+s.nombre+'\\')">Borrar</button>').join('<br>')):'Sin sucursales todavía';
     }
     async function borrarSucursal(empresaId,id,nombre){
       if(!confirm('¿Borrar la sucursal "'+nombre+'"?'))return;

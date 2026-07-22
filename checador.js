@@ -112,29 +112,65 @@ function checar({ sucursal, pin, lat, lon, precision, foto }) {
 // ---------- Página que ve el empleado ----------
 function renderChecador(suc) {
   const body = `
-    <div class="card">
+    <div class="card" style="text-align:center">
+      <div style="width:52px;height:52px;border-radius:14px;background:var(--acento);
+                  display:flex;align-items:center;justify-content:center;margin:0 auto 12px">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 3"></path>
+        </svg>
+      </div>
       <h1>${esc(suc.empresa_nombre)}</h1>
       <p class="muted">${esc(suc.nombre)}</p>
+    </div>
+
+    <div class="card">
       <form id="f" autocomplete="off">
         <label for="pin">Tu PIN</label>
         <input id="pin" name="pin" type="text" inputmode="numeric" pattern="[0-9]*"
                maxlength="8" required autofocus autocomplete="off" placeholder="••••"
-               style="font-size:1.5rem;letter-spacing:.3em;text-align:center">
+               style="font-size:1.9rem;letter-spacing:.4em;text-align:center;font-weight:700;padding:16px 13px">
+
+        <div id="teclado" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px">
+          ${['1','2','3','4','5','6','7','8','9','borrar','0','limpiar'].map(k => {
+            if (k === 'borrar') return `<button type="button" class="btn-ghost" data-tecla="borrar" aria-label="Borrar dígito"
+                 style="margin-top:0;min-height:52px">
+                 <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                   <path d="M21 4H8l-6 8 6 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"></path><path d="M13 9l6 6M19 9l-6 6"></path>
+                 </svg></button>`;
+            if (k === 'limpiar') return `<button type="button" class="btn-ghost" data-tecla="limpiar" aria-label="Borrar todo"
+                 style="margin-top:0;min-height:52px;font-size:.8rem;font-weight:700">C</button>`;
+            return `<button type="button" class="btn-ghost" data-tecla="${k}" style="margin-top:0;min-height:52px;font-size:1.3rem;font-weight:700">${k}</button>`;
+          }).join('')}
+        </div>
+
         <div id="df" style="display:none">
           <label for="foto">Selfie de evidencia</label>
           <input id="foto" name="foto" type="file" accept="image/*" capture="user">
           <p class="muted">No pudimos verificar tu ubicación. Tómate una selfie para registrar tu checada.</p>
         </div>
-        <button id="b" type="submit">Checar</button>
+        <button id="b" type="submit">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 6L9 17l-5-5"></path>
+          </svg>
+          Checar
+        </button>
       </form>
       <div id="m" class="msg"></div>
-      <p class="muted" style="margin-top:16px">Se registra tu ubicación al momento de checar.</p>
+      <p class="muted" style="margin-top:16px;text-align:center">Se registra tu ubicación al momento de checar.</p>
     </div>`;
 
   const script = `
     const HAY_GEOCERCA=${suc.lat != null && suc.lon != null};
     const f=document.getElementById('f'),b=document.getElementById('b'),m=document.getElementById('m'),
-          df=document.getElementById('df'),foto=document.getElementById('foto');
+          df=document.getElementById('df'),foto=document.getElementById('foto'),pinEl=document.getElementById('pin');
+    document.getElementById('teclado').addEventListener('click',e=>{
+      const t=e.target.closest('[data-tecla]'); if(!t) return;
+      const k=t.dataset.tecla;
+      if(k==='limpiar') pinEl.value='';
+      else if(k==='borrar') pinEl.value=pinEl.value.slice(0,-1);
+      else if(pinEl.value.length<8) pinEl.value+=k;
+      pinEl.focus();
+    });
     function ubicacion(){
       return new Promise(r=>{
         if(!navigator.geolocation) return r({});
@@ -152,20 +188,24 @@ function renderChecador(suc) {
       c.getContext('2d').drawImage(img,0,0,c.width,c.height);
       return c.toDataURL('image/jpeg',0.7);
     }
+    const ICONO_CHECK='<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg>';
+    const ICONO_OK='<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M8 12l3 3 5-6"></path></svg>';
+    const ICONO_BAD='<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16h.01"></path></svg>';
+    function textoBoton(t){ b.innerHTML=t===''?ICONO_CHECK+'Checar':t; }
     function pedirFoto(){
       df.style.display='block'; foto.required=true;
       m.className='msg show bad';
-      m.textContent='No pudimos verificar tu ubicación. Tómate una selfie y vuelve a presionar Checar.';
+      m.innerHTML=ICONO_BAD+'<span>No pudimos verificar tu ubicación. Tómate una selfie y vuelve a presionar Checar.</span>';
     }
     f.addEventListener('submit',async e=>{
-      e.preventDefault(); b.disabled=true; b.textContent='Registrando…'; m.className='msg';
+      e.preventDefault(); b.disabled=true; textoBoton('Registrando…'); m.className='msg';
       try{
         const geo=await ubicacion();
         // Sin lectura GPS o con precisión peor a 500 m no se puede verificar la
         // geocerca: se exige selfie de evidencia.
         const necesitaFoto=HAY_GEOCERCA&&(geo.lat==null||geo.precision>500);
         if(necesitaFoto&&!foto.files[0]){pedirFoto();return;}
-        const body={pin:document.getElementById('pin').value,...geo};
+        const body={pin:pinEl.value,...geo};
         if(necesitaFoto) body.foto=await comprimirFoto(foto.files[0]);
         const r=await fetch(location.pathname+'/checar',{method:'POST',
           headers:{'Content-Type':'application/json'},
@@ -174,16 +214,16 @@ function renderChecador(suc) {
         if(!r.ok){if(d.requiere_foto){pedirFoto();return;}throw new Error(d.error||'Error');}
         const hora=(d.hora||'').slice(11,16);
         m.className='msg show ok';
-        m.textContent=d.tipo.toUpperCase()+' registrada · '+d.empleado+' · '+hora+
-          (d.en_sitio===0?' (fuera del área)':'');
+        m.innerHTML=ICONO_OK+'<span>'+d.tipo.toUpperCase()+' registrada · '+d.empleado+' · '+hora+
+          (d.en_sitio===0?' (fuera del área)':'')+'</span>';
         f.reset(); df.style.display='none'; foto.required=false;
       }catch(err){
         m.className='msg show bad';
-        m.textContent=/fetch|network/i.test(err.message)
-          ? 'Sin conexión. Revisa tu señal e intenta de nuevo.' : err.message;
+        m.innerHTML=ICONO_BAD+'<span>'+(/fetch|network/i.test(err.message)
+          ? 'Sin conexión. Revisa tu señal e intenta de nuevo.' : err.message)+'</span>';
       }finally{
-        b.disabled=false; b.textContent='Checar';
-        document.getElementById('pin').focus();
+        b.disabled=false; textoBoton('');
+        pinEl.focus();
       }
     });`;
 
