@@ -11,7 +11,12 @@ function renderPanel(empresa) {
         <tbody id="tsucursales"></tbody></table>
       </div>
 
-      <div class="row" style="margin-top:16px">
+      <label for="sucSeleccionar" style="margin-top:16px">Viendo sucursal</label>
+      <select id="sucSeleccionar" onchange="onCambiarSeleccionSucursal()">
+        <option value="">+ Nueva sucursal</option>
+      </select>
+
+      <div class="row" style="margin-top:10px">
         <div><label for="sucnom">Nombre</label><input id="sucnom" placeholder="Sucursal Centro"></div>
         <div><label for="sucslug">Slug (para la URL)</label><input id="sucslug" placeholder="centro"></div>
       </div>
@@ -101,15 +106,19 @@ function renderPanel(empresa) {
     });
     function cancelarEdicionSucursal(){
       editandoSucId=null; $('sucnom').value=''; $('sucslug').value=''; $('sucslug').disabled=false;
-      $('cancelarEdicion').style.display='none';
+      $('cancelarEdicion').style.display='none'; $('sucSeleccionar').value='';
     }
     window.editarSucursal=function(id){
       const s=sucursalesCache.find(x=>x.id===id); if(!s) return;
       editandoSucId=id; $('sucnom').value=s.nombre; $('sucslug').value=s.slug; $('sucslug').disabled=true;
       $('sucradio').value=s.radio_m||120; $('sucradioval').textContent=$('sucradio').value;
-      $('cancelarEdicion').style.display='block';
+      $('cancelarEdicion').style.display='block'; $('sucSeleccionar').value=id;
       iniciarMapaSuc(s.lat,s.lon); mapaSuc.setView([s.lat,s.lon],16); ponerPunto(s.lat,s.lon);
     };
+    function onCambiarSeleccionSucursal(){
+      const id=$('sucSeleccionar').value;
+      if(!id) cancelarEdicionSucursal(); else editarSucursal(Number(id));
+    }
     async function guardarSucursal(){
       if(puntoLat==null){aviso($('ms'),'Toca el mapa para poner la ubicación',false);return;}
       const body={nombre:$('sucnom').value,slug:$('sucslug').value,lat:puntoLat,lon:puntoLon,radio_m:+$('sucradio').value};
@@ -126,6 +135,8 @@ function renderPanel(empresa) {
         '<td><button class="btn-sm btn-ghost" onclick="editarSucursal('+s.id+')">Editar</button></td></tr>').join('')
         ||vacio(5,'Sin sucursales todavía. Agrega la primera abajo.');
       $('esuc').innerHTML='<option value="">Sin asignar</option>'+d.map(s=>'<option value="'+s.id+'">'+s.nombre+'</option>').join('');
+      $('sucSeleccionar').innerHTML='<option value="">+ Nueva sucursal</option>'+d.map(s=>'<option value="'+s.id+'">'+s.nombre+'</option>').join('');
+      if(editandoSucId) $('sucSeleccionar').value=editandoSucId;
     }
 
     // ---------- Asistencia ----------
@@ -141,13 +152,19 @@ function renderPanel(empresa) {
     // ---------- Empleados ----------
     async function cargarEmpleados(){
       const d=await api('/empleados');
-      $('templeados').innerHTML=d.map(e=>'<tr><td>'+e.nombre+'</td><td><code>'+e.pin+'</code></td><td>'+(e.sucursal_nombre||'—')+'</td><td>'+(e.activo?(e.ultimo||'—'):'baja')+'</td><td>'+(e.activo?'<button class="btn-sm btn-ghost" onclick="baja('+e.id+')">Baja</button>':'')+'</td></tr>').join('')||vacio(5,'Sin empleados');
+      $('templeados').innerHTML=d.map(e=>'<tr><td>'+e.nombre+'</td><td><code>'+e.pin+'</code></td><td>'+(e.sucursal_nombre||'—')+'</td><td>'+(e.activo?(e.ultimo||'—'):'baja')+'</td><td>'+
+        (e.activo?'<button class="btn-sm btn-ghost" onclick="baja('+e.id+')">Baja</button>'
+                 :'<button class="btn-sm btn-danger" onclick="borrarEmpleado('+e.id+')">Borrar</button>')+'</td></tr>').join('')||vacio(5,'Sin empleados');
     }
     async function crearEmpleado(){
       try{await api('/empleados',{method:'POST',body:JSON.stringify({nombre:$('enom').value,pin:$('epin').value,sucursal_id:$('esuc').value||null})});
         aviso($('me'),'Empleado agregado',true);$('enom').value=$('epin').value='';cargarEmpleados();}catch(e){aviso($('me'),e.message,false);}
     }
     async function baja(id){if(!confirm('¿Dar de baja a este empleado?'))return;await api('/empleados/'+id,{method:'DELETE'});cargarEmpleados();}
+    async function borrarEmpleado(id){
+      if(!confirm('¿Borrar definitivamente a este empleado? No se puede deshacer.'))return;
+      try{await api('/empleados/'+id+'/permanente',{method:'DELETE'});cargarEmpleados();}catch(e){alert(e.message);}
+    }
 
     // Centra el mapa donde esté el admin (o Ciudad de México si no da permiso), para no partir de un mapa del mundo.
     function centrarMapaInicial(){

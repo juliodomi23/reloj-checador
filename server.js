@@ -174,6 +174,20 @@ app.delete('/:empresa/api/empleados/:id', authEmpresa, (req, res) => {
   res.json({ ok: r.changes > 0 });
 });
 
+// Borrado definitivo: solo si ya está de baja y no tiene checadas (si las tiene,
+// borrarlo perdería su historial de asistencia — se queda dado de baja).
+app.delete('/:empresa/api/empleados/:id/permanente', authEmpresa, (req, res) => {
+  const id = Number(req.params.id);
+  const empleado = db.prepare('SELECT activo FROM empleados WHERE id = ? AND empresa_id = ?').get(id, req.empresa.id);
+  if (!empleado) return res.status(404).json({ error: 'Empleado no existe' });
+  if (empleado.activo) return res.status(400).json({ error: 'Da de baja al empleado antes de borrarlo' });
+  if (db.prepare('SELECT 1 FROM checadas WHERE empleado_id = ? LIMIT 1').get(id)) {
+    return res.status(409).json({ error: 'Tiene checadas registradas: no se puede borrar sin perder su historial de asistencia' });
+  }
+  db.prepare('DELETE FROM empleados WHERE id = ? AND empresa_id = ?').run(id, req.empresa.id);
+  res.json({ ok: true });
+});
+
 app.get('/:empresa/api/checadas', authEmpresa, (req, res) => {
   const dias = Math.min(Math.max(Number(req.query.dias) || 7, 1), 90);
   const filas = db.prepare(`

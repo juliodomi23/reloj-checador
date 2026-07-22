@@ -69,6 +69,12 @@ const CSS = `
        padding:3px 9px;border-radius:99px}
   .badge-ok{background:var(--ok-bg);color:var(--ok-text)}
   .badge-bad{background:var(--bad-bg);color:var(--bad-text)}
+  input[type=range]{-webkit-appearance:none;appearance:none;padding:0;min-height:auto;height:6px;
+       background:var(--border);border:none;border-radius:99px}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:20px;height:20px;
+       border-radius:50%;background:var(--acento,#1E3A8A);cursor:pointer;box-shadow:0 1px 4px rgba(15,23,42,.35)}
+  input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;border:none;
+       background:var(--acento,#1E3A8A);cursor:pointer;box-shadow:0 1px 4px rgba(15,23,42,.35)}
   @media (max-width:480px){
     .wrap{padding:16px 14px 40px}
     .card{padding:18px;border-radius:12px}

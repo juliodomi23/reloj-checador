@@ -130,6 +130,7 @@ function renderChecador(suc) {
       <h2>Tu ubicación</h2>
       <div id="mapa" style="height:220px;border-radius:12px;overflow:hidden;background:#E2E8F0"></div>
       <p class="muted" id="distTxt" style="margin-top:10px">Buscando tu ubicación…</p>
+      <div id="areaEstado" class="msg" style="margin-top:8px"></div>
     </div>` : ''}
 
     <div class="card">
@@ -184,8 +185,15 @@ function renderChecador(suc) {
         .addTo(mapa).bindTooltip('Tu celular');
       mapa.fitBounds(L.latLngBounds([[SUC_LAT,SUC_LON],[lat,lon]]).pad(0.4));
       const d=Math.round(distanciaClienteM(lat,lon,SUC_LAT,SUC_LON));
-      document.getElementById('distTxt').textContent=
-        'Estás a '+d+' m de la sucursal (radio permitido: '+SUC_RADIO+' m).';
+      document.getElementById('distTxt').textContent='Estás a '+d+' m de la sucursal.';
+      // Aviso informativo para el empleado; el servidor decide de verdad si acepta el checado
+      // (aplica el margen por imprecisión del GPS que aquí no se conoce todavía).
+      const dentro=d<=SUC_RADIO;
+      const estado=document.getElementById('areaEstado');
+      estado.className='msg show '+(dentro?'ok':'bad');
+      estado.innerHTML=(dentro?ICONO_OK:ICONO_BAD)+'<span>'+(dentro
+        ?'Estás dentro del área permitida ('+SUC_RADIO+' m).'
+        :'Estás fuera del área permitida ('+SUC_RADIO+' m). Acércate para poder checar.')+'</span>';
     }
     function ubicacion(){
       return new Promise(r=>{

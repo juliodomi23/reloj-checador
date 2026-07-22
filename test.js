@@ -175,6 +175,29 @@ function prueba(n, fn) {
     assert.strictEqual(checar({ sucursal: suc, pin: '5555', lat: 16.7516, lon: -93.1161, precision: 10 }).tipo, 'entrada', 'el olvido invirtió la alternancia');
   });
 
+  await prueba('borrado definitivo: solo tras baja, y bloqueado si tiene checadas', async () => {
+    const auth = 'Basic ' + Buffer.from('taller-primo:demo').toString('base64');
+    const cabecera = { Authorization: auth, 'Content-Type': 'application/json' };
+    const r = await get('/taller-primo/api/empleados', { method: 'POST', headers: cabecera, body: JSON.stringify({ nombre: 'Sin Uso', pin: '2222' }) });
+    const id = (await r.json()).id;
+
+    const antesDeBaja = await get(`/taller-primo/api/empleados/${id}/permanente`, { method: 'DELETE', headers: cabecera });
+    assert.strictEqual(antesDeBaja.status, 400, 'no debería dejar borrar sin dar de baja primero');
+
+    await get(`/taller-primo/api/empleados/${id}`, { method: 'DELETE', headers: cabecera });
+    const sinChecadas = await get(`/taller-primo/api/empleados/${id}/permanente`, { method: 'DELETE', headers: cabecera });
+    assert.strictEqual(sinChecadas.status, 200);
+    const listaTrasBorrar = await (await get('/taller-primo/api/empleados', { headers: cabecera })).json();
+    assert.ok(!listaTrasBorrar.some(e => e.id === id), 'debió desaparecer de la lista');
+
+    // Pedro (pin 5555) ya tiene checadas de la prueba anterior.
+    const conHistorial = await get('/taller-primo/api/empleados', { headers: cabecera });
+    const pedro = (await conHistorial.json()).find(e => e.nombre === 'Pedro');
+    await get(`/taller-primo/api/empleados/${pedro.id}`, { method: 'DELETE', headers: cabecera });
+    const bloqueado = await get(`/taller-primo/api/empleados/${pedro.id}/permanente`, { method: 'DELETE', headers: cabecera });
+    assert.strictEqual(bloqueado.status, 409, 'no debería borrar a alguien con checadas registradas');
+  });
+
   await prueba('un PIN equivocado no registra nada', () => {
     const antes = db.prepare('SELECT COUNT(*) n FROM checadas').get().n;
     const r = checar({ sucursal: leerSucursal('taller-primo', 'centro'), pin: '0000' });
