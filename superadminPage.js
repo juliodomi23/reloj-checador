@@ -36,11 +36,12 @@ function renderSuperadmin() {
           <div><label>Slug sucursal</label><input id="sslug" placeholder="centro"></div>
           <div><label>Nombre</label><input id="snom" placeholder="Sucursal Centro"></div>
         </div>
-        <div class="row">
-          <div><label>Lat</label><input id="slat" placeholder="16.7516"></div>
-          <div><label>Lon</label><input id="slon" placeholder="-93.1161"></div>
-          <div><label>Radio m</label><input id="sradio" placeholder="120"></div>
-        </div>
+        <label for="sradio">Radio permitido: <span id="sradioval">120</span> m</label>
+        <input id="sradio" type="range" min="30" max="400" step="10" value="120" style="width:100%;margin-top:6px">
+        <label style="margin-top:12px">Toca el mapa donde está la sucursal (arrastra el punto para ajustar)</label>
+        <input id="smaps" placeholder="¿Tienes el link de Google Maps? Pégalo aquí y va solo" style="margin-bottom:6px">
+        <div id="mapaSuc" style="height:260px;border-radius:12px;overflow:hidden;background:#E2E8F0"></div>
+        <p class="muted" id="sucCoordTxt" style="margin-top:8px">Sin punto todavía. Toca el mapa.</p>
         <button onclick="crearSucursal()">Crear sucursal</button>
         <label style="margin-top:14px">URL para grabar en la etiqueta NFC</label>
         <input id="surl" readonly placeholder="Aparece aquí al crear la sucursal">
@@ -54,7 +55,10 @@ function renderSuperadmin() {
         <table><thead><tr><th>Empresa</th><th>Slug</th><th>Sucursales</th><th>Empleados</th><th>Panel</th><th></th></tr></thead>
         <tbody id="tabla"></tbody></table>
       </div>
-    </div>`;
+    </div>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>`;
 
   const script = `
     const BASE=${JSON.stringify(BASE_URL)};
@@ -87,13 +91,52 @@ function renderSuperadmin() {
       try{await api('/superadmin/api/empresas/'+empresaId+'/sucursales/'+id,{method:'DELETE'});cargarSucursales();}catch(e){alert(e.message);}
     }
     $('sempresa').addEventListener('change',cargarSucursales);
+
+    // Mismo mapa que el panel de la empresa: se toca para poner el punto, se arrastra para ajustar.
+    let mapaSuc,marcadorSuc,circuloSuc,puntoLat=null,puntoLon=null;
+    function iniciarMapaSuc(lat,lon){
+      if(mapaSuc) return;
+      mapaSuc=L.map('mapaSuc').setView([lat,lon],15);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(mapaSuc);
+      mapaSuc.on('click',e=>ponerPunto(e.latlng.lat,e.latlng.lng));
+    }
+    function ponerPunto(lat,lon){
+      puntoLat=lat; puntoLon=lon;
+      if(marcadorSuc) marcadorSuc.setLatLng([lat,lon]);
+      else marcadorSuc=L.marker([lat,lon],{draggable:true})
+        .addTo(mapaSuc).on('dragend',e=>ponerPunto(e.target.getLatLng().lat,e.target.getLatLng().lng));
+      const radio=+$('sradio').value;
+      if(circuloSuc) circuloSuc.setLatLng([lat,lon]);
+      else circuloSuc=L.circle([lat,lon],{radius:radio,color:'#0891B2',fillColor:'#0891B2',fillOpacity:.15}).addTo(mapaSuc);
+      $('sucCoordTxt').textContent='Punto listo: '+lat.toFixed(5)+', '+lon.toFixed(5);
+    }
+    $('sradio').addEventListener('input',()=>{
+      $('sradioval').textContent=$('sradio').value;
+      if(circuloSuc) circuloSuc.setRadius(+$('sradio').value);
+    });
+    // Atajo: el link de Google Maps que mandó el cliente mueve el pin en vez de teclear coords.
+    async function leerMaps(){
+      const texto=$('smaps').value.trim(); if(!texto)return;
+      try{const d=await api('/superadmin/api/coords',{method:'POST',body:JSON.stringify({texto})});
+        iniciarMapaSuc(d.lat,d.lon); mapaSuc.setView([d.lat,d.lon],17); ponerPunto(d.lat,d.lon);
+      }catch(e){aviso($('ms'),e.message,false);}
+    }
+    $('smaps').addEventListener('change',leerMaps);
+    $('smaps').addEventListener('paste',()=>setTimeout(leerMaps,0));
+    // Centra donde esté el admin (o CDMX si no da permiso), para no partir de un mapa del mundo.
+    (function centrarMapaInicial(){
+      const porDefecto=()=>iniciarMapaSuc(19.4326,-99.1332);
+      if(!navigator.geolocation) return porDefecto();
+      navigator.geolocation.getCurrentPosition(p=>iniciarMapaSuc(p.coords.latitude,p.coords.longitude),porDefecto,{timeout:5000});
+    })();
     async function crearEmpresa(){
       try{await api('/superadmin/api/empresas',{method:'POST',body:JSON.stringify({slug:$('cslug').value,nombre:$('cnom').value,admin_pass:$('cpass').value})});
         aviso($('mc'),'Empresa creada',true);cargar();}catch(e){aviso($('mc'),e.message,false);}
     }
     async function crearSucursal(){
+      if(puntoLat==null){aviso($('ms'),'Toca el mapa para poner la ubicación',false);return;}
       try{const d=await api('/superadmin/api/empresas/'+$('sempresa').value+'/sucursales',{method:'POST',
-        body:JSON.stringify({slug:$('sslug').value,nombre:$('snom').value,lat:$('slat').value||null,lon:$('slon').value||null,radio_m:$('sradio').value||null})});
+        body:JSON.stringify({slug:$('sslug').value,nombre:$('snom').value,lat:puntoLat,lon:puntoLon,radio_m:+$('sradio').value})});
         $('surl').value=BASE+d.url; aviso($('ms'),'Sucursal creada. Graba esa URL en la etiqueta.',true); cargar();
       }catch(e){aviso($('ms'),e.message,false);}
     }

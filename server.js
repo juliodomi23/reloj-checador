@@ -108,6 +108,25 @@ app.post('/superadmin/api/empresas/:id/sucursales', (req, res) => {
   } catch { res.status(409).json({ error: 'Ese slug de sucursal ya existe en la empresa' }); }
 });
 
+// Saca lat/lon de un link de Google Maps (o de un "16.75, -93.11" copiado con clic derecho).
+// ponytail: en vez de un mapa embebido; si algún día se necesita mover el pin, ahí sí Leaflet.
+const RE_COORDS = /(-?\d{1,3}\.\d{4,})[,\s/@]+(-?\d{1,3}\.\d{4,})/;
+const HOST_MAPS = /^https:\/\/(maps\.app\.goo\.gl|goo\.gl|(www\.)?google\.[a-z.]+)\//;
+app.post('/superadmin/api/coords', async (req, res) => {
+  let texto = String(req.body?.texto || '').trim();
+  if (/^https?:\/\//i.test(texto)) {
+    if (!HOST_MAPS.test(texto)) return res.status(400).json({ error: 'Solo links de Google Maps' });
+    // Los links cortos (Compartir) no traen coords: hay que seguir el redirect.
+    if (!RE_COORDS.test(texto)) {
+      try { texto = (await fetch(texto, { redirect: 'follow', signal: AbortSignal.timeout(5000) })).url; }
+      catch { return res.status(400).json({ error: 'No pude abrir ese link' }); }
+    }
+  }
+  const m = texto.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/) || texto.match(RE_COORDS);
+  if (!m) return res.status(400).json({ error: 'No encontré coordenadas ahí' });
+  res.json({ lat: Number(m[1]), lon: Number(m[2]) });
+});
+
 app.get('/superadmin/api/empresas/:id/sucursales', (req, res) => {
   res.json(db.prepare('SELECT id, slug, nombre, lat, lon, radio_m FROM sucursales WHERE empresa_id = ? AND activo = 1').all(Number(req.params.id)));
 });

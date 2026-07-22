@@ -68,6 +68,16 @@ function prueba(n, fn) {
     assert.strictEqual(sucUrl, '/taller-primo/centro');
   });
 
+  await prueba('extrae coords de links y texto de Google Maps', async () => {
+    const coords = async texto => (await get('/superadmin/api/coords', jsonSA({ texto }))).json();
+    assert.deepStrictEqual(await coords('16.7516, -93.1161'), { lat: 16.7516, lon: -93.1161 });
+    assert.deepStrictEqual(await coords('https://www.google.com/maps/@16.7516,-93.1161,17z'), { lat: 16.7516, lon: -93.1161 });
+    // El !3d/!4d es el pin exacto y gana sobre el @ del centro del mapa.
+    assert.deepStrictEqual(await coords('https://www.google.com/maps/place/X/@16.7,-93.1,17z/data=!3d16.7516!4d-93.1161'), { lat: 16.7516, lon: -93.1161 });
+    assert.strictEqual((await get('/superadmin/api/coords', jsonSA({ texto: 'https://evil.com/a' }))).status, 400);
+    assert.strictEqual((await get('/superadmin/api/coords', jsonSA({ texto: 'la esquina de siempre' }))).status, 400);
+  });
+
   await prueba('sin credenciales el superadmin da 401', async () => {
     assert.strictEqual((await get('/superadmin/api/empresas')).status, 401);
   });
