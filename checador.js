@@ -46,7 +46,7 @@ function evaluarSitio(suc, lat, lon, precision) {
 function siguienteTipo(empleadoId, horasMax = HORAS_MAX_TURNO) {
   const ultima = db.prepare(`
     SELECT tipo, (julianday('now') - julianday(created_at)) * 24 AS horas
-    FROM checadas WHERE empleado_id = ? ORDER BY id DESC LIMIT 1
+    FROM checadas WHERE empleado_id = ? AND anulada = 0 ORDER BY id DESC LIMIT 1
   `).get(empleadoId);
   if (!ultima || ultima.tipo === 'salida') return 'entrada';
   return ultima.horas > horasMax ? 'entrada' : 'salida';

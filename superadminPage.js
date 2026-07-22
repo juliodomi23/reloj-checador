@@ -12,7 +12,9 @@ function renderSuperadmin() {
             <rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 9h18M8 2v4M16 2v4"></path>
           </svg>
         </div>
-        <div><h1>Reloj Checador</h1><p class="muted" id="resumen">Cargando…</p></div>
+        <div style="flex:1"><h1>Reloj Checador</h1><p class="muted" id="resumen">Cargando…</p></div>
+        <a href="/superadmin/api/respaldo" class="btn-sm btn-ghost" style="flex:none;display:inline-flex;align-items:center;min-height:38px"
+           title="Descarga una copia de la base. Guárdala fuera del VPS.">Descargar respaldo</a>
       </div>
     </div>
 

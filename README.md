@@ -19,13 +19,15 @@ App de asistencia por PIN + etiqueta NFC. Multi-empresa, multi-sucursal, sin log
 
 - **Empleado**: sin login, solo el PIN. Página pública en `/<empresa>/<sucursal>`.
 - **Panel de empresa** (`/<empresa>/panel`, Basic Auth con `slug` + `admin_pass` propios): altas/bajas de empleados, tabla de asistencia filtrable por días (las checadas sin GPS muestran "📷 ver foto" con la selfie de evidencia), y descarga de CSV para nómina en hora local de la sucursal (con protección contra fórmulas maliciosas en Excel).
+  - **Corrección de checadas**: el patrón puede capturar a mano una checada olvidada (se teclea la hora real, en la zona de la sucursal, y queda marcada como `origen='manual'`) y **anular** una equivocada. Anular no borra: la fila se conserva y solo deja de contar para nómina y estadísticas — el histórico completo es lo que le da valor probatorio al registro (art. 804 LFT).
 - **Superadmin** (`/superadmin`, Basic Auth global de Ámbar Rojo): da de alta empresas y sus sucursales (con lat/lon/radio), y genera la URL exacta que hay que grabar en cada etiqueta NFC.
 
 ## Stack
 
 - Node.js + Express, SQLite nativo (`node:sqlite`, sin ORM).
 - HTML servido como strings (`ui.js` + `esc()` para escapar) — sin motor de plantillas ni build step.
-- Un solo proceso: rate-limit y SQLite viven en memoria/disco local (`data/checador.db`). No pensado para múltiples réplicas tal cual está.
+- Un solo proceso: rate-limit y SQLite viven en memoria/disco local (`data/checador.db`), en modo WAL y con `busy_timeout`. No pensado para múltiples réplicas tal cual está.
+- `mantenimiento.js` corre en el mismo proceso, al arrancar y cada 24 h: respaldo con `VACUUM INTO` en `/data/backups`, borrado de respaldos de más de 14 días y purga de las selfies de más de 90 días (la checada se queda, la foto no).
 - Despliegue vía Docker (`Dockerfile` + `docker-compose.yml`), pensado para EasyPanel.
 
 ## Seguridad notable
@@ -41,7 +43,8 @@ App de asistencia por PIN + etiqueta NFC. Multi-empresa, multi-sucursal, sin log
 1. Crear el servicio desde este repo (EasyPanel detecta el `Dockerfile`) o pegar el `docker-compose.yml`.
 2. **Variables de entorno obligatorias**: `SUPERADMIN_PASS` (una fuerte; con la default el servidor no arranca). Opcionales: `SUPERADMIN_USER` (default `admin`), `PORT` (default 3050).
 3. **Volumen**: montar un volumen en `/data` (el compose ya trae `checador_data:/data`). Ahí vive `checador.db` con todo: checadas y fotos. Sin este volumen se pierde todo en cada deploy.
-4. Apuntar el dominio (`checador.ambarrojostudios.cloud`) al puerto **3050**.
-5. Probar: `GET /salud` debe responder `{"ok":true,...}`, y `/superadmin` pedir credenciales.
+4. **Respaldo**: los automáticos viven en `/data/backups`, o sea **en el mismo volumen que la BD**. Sirven contra un borrado o una corrupción, no contra perder el volumen. Para un respaldo de verdad hay que sacar la copia del VPS: botón *Descargar respaldo* en `/superadmin`, o `curl -u admin:PASS https://checador.../superadmin/api/respaldo -o copia.db` desde otra máquina. **Restaurar** = detener el servicio, dejar ese archivo como `/data/checador.db` y levantar.
+5. Apuntar el dominio (`checador.ambarrojostudios.cloud`) al puerto **3050**.
+6. Probar: `GET /salud` debe responder `{"ok":true,...}`, y `/superadmin` pedir credenciales.
 
 Para correr las pruebas localmente: `node test.js` (usa una BD temporal, no toca la real).

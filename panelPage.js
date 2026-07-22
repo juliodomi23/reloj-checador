@@ -82,9 +82,21 @@ function renderPanel(empresa) {
         </div>
       </div>
       <div class="table-wrap">
-        <table><thead><tr><th>Empleado</th><th>Tipo</th><th>Fecha</th><th>Sitio</th></tr></thead>
+        <table><thead><tr><th>Empleado</th><th>Tipo</th><th>Fecha</th><th>Sitio</th><th></th></tr></thead>
         <tbody id="tchecadas"></tbody></table>
       </div>
+
+      <details style="margin-top:16px">
+        <summary style="cursor:pointer;font-weight:600;font-size:.9rem">Capturar una checada a mano</summary>
+        <p class="muted" style="margin-top:8px">Para cuando a alguien se le olvidó marcar o no había señal. Queda registrada como capturada por ti, no como checada del empleado.</p>
+        <div class="row">
+          <div><label for="mcemp">Empleado</label><select id="mcemp"></select></div>
+          <div><label for="mctipo">Tipo</label><select id="mctipo"><option value="entrada">Entrada</option><option value="salida">Salida</option></select></div>
+          <div><label for="mcfecha">Fecha y hora real</label><input id="mcfecha" type="datetime-local"></div>
+        </div>
+        <button onclick="capturarChecada()">Guardar checada</button>
+        <div id="mmc" class="msg"></div>
+      </details>
     </div>
 
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -185,7 +197,26 @@ function renderPanel(empresa) {
       const sitio=c=>c.en_sitio===1?'<span class="badge badge-ok">'+ICONO_OK+'En sitio</span>'
         :c.en_sitio===0?'<span class="badge badge-bad">'+ICONO_BAD+'Fuera</span>'
         :c.tiene_foto?'<a href="/'+SLUG+'/api/checadas/'+c.id+'/foto" target="_blank">'+ICONO_FOTO+' ver foto</a>':'—';
-      $('tchecadas').innerHTML=d.map(c=>'<tr><td>'+esc(c.empleado)+'</td><td>'+esc(c.tipo)+'</td><td>'+esc(c.created_at)+'</td><td>'+sitio(c)+'</td></tr>').join('')||vacio(4,'Sin checadas');
+      // Las anuladas se siguen viendo (tachadas): dejan de contar para la nómina
+      // pero no desaparecen del histórico.
+      $('tchecadas').innerHTML=d.map(c=>'<tr'+(c.anulada?' style="opacity:.45;text-decoration:line-through"':'')+
+        '><td>'+esc(c.empleado)+'</td><td>'+esc(c.tipo)+
+        (c.origen==='manual'?' <span class="badge badge-ok">a mano</span>':'')+
+        '</td><td>'+esc(c.created_at)+'</td><td>'+(c.anulada?'anulada':sitio(c))+'</td><td>'+
+        (c.anulada?'':'<button class="btn-sm btn-ghost" onclick="anularChecada('+c.id+')">Anular</button>')+
+        '</td></tr>').join('')||vacio(5,'Sin checadas');
+    }
+    window.anularChecada=async function(id){
+      if(!confirm('¿Anular esta checada? Deja de contar para la nómina, pero se conserva en el historial.'))return;
+      try{await api('/checadas/'+id+'/anular',{method:'POST'});cargarChecadas();cargarEstadisticas();}catch(e){alert(e.message);}
+    }
+    async function capturarChecada(){
+      try{
+        await api('/checadas',{method:'POST',body:JSON.stringify({
+          empleado_id:$('mcemp').value,tipo:$('mctipo').value,fecha:$('mcfecha').value})});
+        aviso($('mmc'),'Checada capturada',true); $('mcfecha').value='';
+        cargarChecadas(); cargarEstadisticas();
+      }catch(e){aviso($('mmc'),e.message,false);}
     }
 
     // ---------- Empleados ----------
@@ -194,6 +225,7 @@ function renderPanel(empresa) {
       $('templeados').innerHTML=d.map(e=>'<tr><td>'+esc(e.nombre)+'</td><td><code>'+esc(e.pin)+'</code></td><td>'+esc(e.sucursal_nombre||'—')+'</td><td>'+(e.activo?esc(e.ultimo||'—'):'baja')+'</td><td>'+
         (e.activo?'<button class="btn-sm btn-ghost" onclick="baja('+e.id+')">Baja</button>'
                  :'<button class="btn-sm btn-danger" onclick="borrarEmpleado('+e.id+')">Borrar</button>')+'</td></tr>').join('')||vacio(5,'Sin empleados');
+      $('mcemp').innerHTML=d.filter(e=>e.activo).map(e=>'<option value="'+e.id+'">'+esc(e.nombre)+'</option>').join('');
     }
     async function crearEmpleado(){
       try{await api('/empleados',{method:'POST',body:JSON.stringify({nombre:$('enom').value,pin:$('epin').value,sucursal_id:$('esuc').value||null})});

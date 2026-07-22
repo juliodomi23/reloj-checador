@@ -274,6 +274,67 @@ function prueba(n, fn) {
     assert.ok(bloqueado, 'no frenó tras 25 intentos');
   });
 
+  await prueba('el patron captura una checada olvidada y la hora se guarda en su zona', async () => {
+    const auth = 'Basic ' + Buffer.from('taller-primo:demo').toString('base64');
+    const jsonEmp = b => ({ method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+    const emp = db.prepare("SELECT id, nombre FROM empleados WHERE nombre LIKE 'Mar%'").get();
+
+    const r = await get('/taller-primo/api/checadas', jsonEmp({ empleado_id: emp.id, tipo: 'salida', fecha: '2026-03-10T18:30' }));
+    assert.strictEqual(r.status, 201);
+    const id = (await r.json()).id;
+    const fila = db.prepare('SELECT created_at, origen FROM checadas WHERE id = ?').get(id);
+    assert.strictEqual(fila.origen, 'manual');
+    // Se tecleó 18:30 hora de Chiapas; se guarda en UTC y debe volver a leerse 18:30.
+    assert.strictEqual(aHoraLocal(fila.created_at, 'America/Mexico_City').slice(11, 16), '18:30');
+
+    // Datos malos no entran, y no se puede capturar para el empleado de otra empresa.
+    assert.strictEqual((await get('/taller-primo/api/checadas', jsonEmp({ empleado_id: emp.id, tipo: 'comida', fecha: '2026-03-10T18:30' }))).status, 400);
+    assert.strictEqual((await get('/taller-primo/api/checadas', jsonEmp({ empleado_id: emp.id, tipo: 'entrada', fecha: 'ayer' }))).status, 400);
+    assert.strictEqual((await get('/taller-primo/api/checadas', jsonEmp({ empleado_id: 99999, tipo: 'entrada', fecha: '2026-03-10T18:30' }))).status, 404);
+  });
+
+  await prueba('anular una checada la saca de la nomina pero la conserva', async () => {
+    const auth = 'Basic ' + Buffer.from('taller-primo:demo').toString('base64');
+    const jsonEmp = b => ({ method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+    const emp = db.prepare("SELECT id FROM empleados WHERE nombre LIKE 'Mar%'").get();
+    const id = (await (await get('/taller-primo/api/checadas', jsonEmp({ empleado_id: emp.id, tipo: 'entrada', fecha: '2026-03-11T09:00' }))).json()).id;
+
+    assert.strictEqual((await get('/taller-primo/api/checadas/' + id + '/anular', jsonEmp({}))).status, 200);
+    assert.strictEqual(db.prepare('SELECT anulada FROM checadas WHERE id = ?').get(id).anulada, 1, 'no quedó marcada');
+    assert.ok(db.prepare('SELECT 1 FROM checadas WHERE id = ?').get(id), 'se borró en vez de anularse');
+
+    const csv = await (await get('/taller-primo/api/checadas.csv?dias=90', { headers: { Authorization: auth } })).text();
+    assert.ok(!csv.includes('2026-03-11 09:00'), 'la anulada sigue en el CSV de nómina');
+    // Y no puede anular checadas de otra empresa.
+    assert.strictEqual((await get('/taller-primo/api/checadas/999999/anular', jsonEmp({}))).status, 404);
+  });
+
+  await prueba('el respaldo se puede restaurar y las fotos viejas se purgan', async () => {
+    const mant = require('./mantenimiento');
+    const destino = mant.respaldar(new Date('2026-07-22T10:00:00Z'));
+    assert.ok(fs.existsSync(destino), 'no se creó el respaldo');
+    // Un respaldo que no se puede abrir no es un respaldo: se verifica leyéndolo.
+    const copia = new (require('node:sqlite').DatabaseSync)(destino, { readOnly: true });
+    assert.strictEqual(copia.prepare('SELECT COUNT(*) n FROM checadas').get().n,
+      db.prepare('SELECT COUNT(*) n FROM checadas').get().n, 'el respaldo no trae las checadas');
+    copia.close();
+
+    // Los respaldos viejos se borran; el de hoy no.
+    const viejo = path.join(mant.DIR, 'checador-2020-01-01.db');
+    fs.writeFileSync(viejo, '');
+    assert.ok(mant.purgarRespaldos(14) >= 1);
+    assert.ok(!fs.existsSync(viejo), 'no borró el respaldo viejo');
+    assert.ok(fs.existsSync(destino), 'borró el respaldo de hoy');
+
+    // La selfie caduca a los 90 días; la checada se queda.
+    const conFoto = db.prepare('SELECT id FROM checadas WHERE foto IS NOT NULL LIMIT 1').get();
+    assert.ok(conFoto, 'el test previo debía dejar una checada con foto');
+    db.prepare("UPDATE checadas SET created_at = datetime('now','-200 days') WHERE id = ?").run(conFoto.id);
+    assert.strictEqual(mant.purgarFotos(90), 1);
+    assert.strictEqual(db.prepare('SELECT foto FROM checadas WHERE id = ?').get(conFoto.id).foto, null);
+    assert.ok(db.prepare('SELECT 1 FROM checadas WHERE id = ?').get(conFoto.id), 'se llevó la checada con la foto');
+  });
+
   await prueba('el CSV sale con BOM y neutraliza fórmulas', async () => {
     const auth = 'Basic ' + Buffer.from('taller-primo:demo').toString('base64');
     db.prepare('INSERT INTO empleados (empresa_id, nombre, pin) VALUES (?, ?, ?)').run(empresaId, '=CMD|calc', '7777');

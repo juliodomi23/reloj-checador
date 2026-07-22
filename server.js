@@ -1,5 +1,5 @@
 const express = require('express');
-const { db, leerSucursal, aHoraLocal } = require('./db');
+const { db, leerSucursal, aHoraLocal, aUtc } = require('./db');
 const { esc, layout } = require('./ui');
 const { renderChecador, checar } = require('./checador');
 const { limitador } = require('./limite');
@@ -133,6 +133,17 @@ app.post('/superadmin/api/coords', async (req, res) => {
   res.json({ lat: Number(m[1]), lon: Number(m[2]) });
 });
 
+// Descarga del respaldo del día. Los respaldos automáticos viven en el mismo
+// volumen que la BD: sirven contra un borrado o una corrupción, NO contra perder
+// el volumen. Esta ruta es la que saca la copia del VPS (a mano o con un curl
+// desde otra máquina) — que es lo único que cuenta como respaldo de verdad.
+app.get('/superadmin/api/respaldo', (req, res) => {
+  const { respaldar } = require('./mantenimiento');
+  try {
+    res.download(respaldar(), `checador-${new Date().toISOString().slice(0, 10)}.db`);
+  } catch (e) { res.status(500).json({ error: 'No se pudo generar el respaldo: ' + e.message }); }
+});
+
 app.get('/superadmin/api/empresas/:id/sucursales', (req, res) => {
   res.json(db.prepare('SELECT id, slug, nombre, lat, lon, radio_m FROM sucursales WHERE empresa_id = ? AND activo = 1').all(Number(req.params.id)));
 });
@@ -227,7 +238,7 @@ app.delete('/:empresa/api/empleados/:id/permanente', authEmpresa, (req, res) => 
 app.get('/:empresa/api/checadas', authEmpresa, (req, res) => {
   const dias = Math.min(Math.max(Number(req.query.dias) || 7, 1), 90);
   const filas = db.prepare(`
-    SELECT c.id, c.tipo, c.created_at, c.en_sitio, (c.foto IS NOT NULL) AS tiene_foto,
+    SELECT c.id, c.tipo, c.created_at, c.en_sitio, (c.foto IS NOT NULL) AS tiene_foto, c.origen, c.anulada,
       e.nombre AS empleado, s.nombre AS sucursal, s.timezone
     FROM checadas c
     JOIN empleados e ON e.id = c.empleado_id
@@ -236,6 +247,36 @@ app.get('/:empresa/api/checadas', authEmpresa, (req, res) => {
     ORDER BY c.id DESC LIMIT 500
   `).all(req.empresa.id, `-${dias} days`);
   res.json(filas.map(f => ({ ...f, created_at: aHoraLocal(f.created_at, f.timezone) })));
+});
+
+// Captura manual: al empleado se le olvidó marcar, o no había señal. Sin esto el
+// día queda mal para siempre y el patrón no puede cerrar su nómina.
+app.post('/:empresa/api/checadas', authEmpresa, (req, res) => {
+  const { empleado_id, tipo, fecha } = req.body || {};
+  if (tipo !== 'entrada' && tipo !== 'salida') return res.status(400).json({ error: 'tipo debe ser entrada o salida' });
+  if (!/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(String(fecha || ''))) return res.status(400).json({ error: 'fecha inválida (usa el selector)' });
+  const empleado = db.prepare('SELECT id, sucursal_id FROM empleados WHERE id = ? AND empresa_id = ?')
+    .get(Number(empleado_id), req.empresa.id);
+  if (!empleado) return res.status(404).json({ error: 'Empleado no existe' });
+  // La hora se teclea en la zona de la sucursal del empleado; si no tiene una
+  // asignada se usa la primera de la empresa, que es de donde salió el horario.
+  const sucursal = db.prepare(`SELECT id, timezone FROM sucursales WHERE empresa_id = ? AND activo = 1
+    ORDER BY (id = ?) DESC, id LIMIT 1`).get(req.empresa.id, empleado.sucursal_id);
+  if (!sucursal) return res.status(400).json({ error: 'Crea una sucursal antes de capturar checadas' });
+  const utc = aUtc(String(fecha), sucursal.timezone);
+  if (!utc) return res.status(400).json({ error: 'fecha inválida' });
+  const r = db.prepare(`INSERT INTO checadas (empleado_id, sucursal_id, tipo, origen, created_at)
+    VALUES (?, ?, ?, 'manual', ?)`).run(empleado.id, sucursal.id, tipo, utc);
+  res.status(201).json({ id: Number(r.lastInsertRowid) });
+});
+
+// Anular no borra: la checada equivocada se marca y deja de contar, pero sigue en
+// el histórico. Borrarla haría imposible probar qué pasó si el trabajador reclama.
+app.post('/:empresa/api/checadas/:id/anular', authEmpresa, (req, res) => {
+  const r = db.prepare(`UPDATE checadas SET anulada = 1 WHERE id = ? AND empleado_id IN
+    (SELECT id FROM empleados WHERE empresa_id = ?)`).run(Number(req.params.id), req.empresa.id);
+  if (!r.changes) return res.status(404).json({ error: 'Checada no encontrada' });
+  res.json({ ok: true });
 });
 
 // Ranking por empleado: asistencias, puntualidad (contra la hora de entrada
@@ -247,7 +288,7 @@ app.get('/:empresa/api/estadisticas', authEmpresa, (req, res) => {
     FROM checadas c
     JOIN empleados e ON e.id = c.empleado_id
     JOIN sucursales s ON s.id = c.sucursal_id
-    WHERE e.empresa_id = ? AND c.tipo = 'entrada' AND c.created_at >= datetime('now', ?)
+    WHERE e.empresa_id = ? AND c.tipo = 'entrada' AND c.anulada = 0 AND c.created_at >= datetime('now', ?)
   `).all(req.empresa.id, `-${dias} days`);
 
   const porEmpleado = new Map();
@@ -287,17 +328,18 @@ app.get('/:empresa/api/checadas/:id/foto', authEmpresa, (req, res) => {
 app.get('/:empresa/api/checadas.csv', authEmpresa, (req, res) => {
   const dias = Math.min(Math.max(Number(req.query.dias) || 30, 1), 90);
   const filas = db.prepare(`
-    SELECT e.nombre AS empleado, c.tipo, c.created_at, s.nombre AS sucursal, s.timezone, c.en_sitio
+    SELECT e.nombre AS empleado, c.tipo, c.created_at, s.nombre AS sucursal, s.timezone, c.en_sitio, c.origen
     FROM checadas c JOIN empleados e ON e.id = c.empleado_id JOIN sucursales s ON s.id = c.sucursal_id
-    WHERE e.empresa_id = ? AND c.created_at >= datetime('now', ?)
+    WHERE e.empresa_id = ? AND c.anulada = 0 AND c.created_at >= datetime('now', ?)
     ORDER BY e.nombre, c.id
   `).all(req.empresa.id, `-${dias} days`);
   // Un nombre que empiece con = o + se ejecuta como fórmula al abrir en Excel.
   const celda = v => { const s = String(v ?? ''); return `"${(/^[=+\-@]/.test(s) ? "'" + s : s).replace(/"/g, '""')}"`; };
   const sitio = v => (v === 1 ? 'en sitio' : v === 0 ? 'fuera del area' : 'sin ubicacion');
-  const csv = ['Empleado;Tipo;Fecha;Sucursal;Ubicacion']
+  const csv = ['Empleado;Tipo;Fecha;Sucursal;Ubicacion;Registro']
     // La BD guarda UTC; el CSV sale en la hora de la sucursal para que nómina lo lea directo.
-    .concat(filas.map(f => [f.empleado, f.tipo, aHoraLocal(f.created_at, f.timezone), f.sucursal, sitio(f.en_sitio)].map(celda).join(';')))
+    .concat(filas.map(f => [f.empleado, f.tipo, aHoraLocal(f.created_at, f.timezone), f.sucursal, sitio(f.en_sitio),
+      f.origen === 'manual' ? 'capturada por admin' : 'checo el empleado'].map(celda).join(';')))
     .join('\r\n');
   res.type('text/csv; charset=utf-8')
      .set('Content-Disposition', `attachment; filename="asistencia-${req.empresa.slug}.csv"`)
@@ -321,6 +363,7 @@ if (require.main === module) {
     console.error('✗ SUPERADMIN_PASS vacía o con un valor por defecto inseguro. Defínela en EasyPanel.');
     process.exit(1);
   }
+  require('./mantenimiento').iniciar();
   app.listen(PORT, () => console.log(`reloj-checador escuchando en http://localhost:${PORT} (fechas en UTC, se convierten por sucursal)`));
 }
 

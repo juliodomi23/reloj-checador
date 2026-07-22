@@ -6,6 +6,10 @@ require('fs').mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA foreign_keys = ON');
+// WAL: sin esto, una lectura larga (el CSV de 90 días) bloquea a quien está checando.
+// busy_timeout evita el 'database is locked' cuando dos escrituras se cruzan.
+db.exec('PRAGMA journal_mode = WAL');
+db.exec('PRAGMA busy_timeout = 5000');
 
 // Modelo por-slug (como reseñas/menú): la etiqueta NFC se graba con la URL
 // /<empresa>/<sucursal>. No hay pool de etiquetas aquí — de eso se encarga
@@ -55,6 +59,8 @@ db.exec(`
     precision_m  REAL,
     en_sitio     INTEGER,
     foto         TEXT,
+    origen       TEXT NOT NULL DEFAULT 'empleado',
+    anulada      INTEGER NOT NULL DEFAULT 0,
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_checadas_emp ON checadas(empleado_id, created_at);
@@ -66,6 +72,11 @@ for (const sql of [
   'ALTER TABLE checadas ADD COLUMN foto TEXT',
   'ALTER TABLE empleados ADD COLUMN sucursal_id INTEGER REFERENCES sucursales(id)',
   'ALTER TABLE sucursales ADD COLUMN hora_entrada TEXT',
+  // Corrección de checadas: 'manual' = la capturó el patrón (olvido de marcar),
+  // 'anulada' = quedó mal y no cuenta, pero NO se borra: el histórico es lo que
+  // le da valor legal al registro (art. 804 LFT).
+  "ALTER TABLE checadas ADD COLUMN origen TEXT NOT NULL DEFAULT 'empleado'",
+  'ALTER TABLE checadas ADD COLUMN anulada INTEGER NOT NULL DEFAULT 0',
 ]) { try { db.exec(sql); } catch {} }
 
 /** 'YYYY-MM-DD HH:MM:SS' en UTC → misma forma en la zona horaria dada. */
@@ -76,6 +87,19 @@ function aHoraLocal(utc, tz) {
   }).format(new Date(utc.replace(' ', 'T') + 'Z'));
 }
 
+/**
+ * Inversa de aHoraLocal: 'YYYY-MM-DD HH:MM' en la zona de la sucursal → UTC.
+ * La usa la captura manual, donde el patrón teclea la hora en que el empleado
+ * llegó de verdad, no la hora en que la está capturando.
+ */
+function aUtc(local, tz) {
+  const comoUtc = new Date(local.replace(' ', 'T').slice(0, 16) + ':00Z');
+  if (isNaN(comoUtc)) return null;
+  // Cuánto se corre esa marca al mirarla en la zona destino = el offset a compensar.
+  const visto = new Date(aHoraLocal(comoUtc.toISOString().slice(0, 19).replace('T', ' '), tz).replace(' ', 'T') + 'Z');
+  return new Date(comoUtc.getTime() * 2 - visto.getTime()).toISOString().slice(0, 19).replace('T', ' ');
+}
+
 function leerSucursal(empresaSlug, sucursalSlug) {
   return db.prepare(`
     SELECT s.*, e.nombre AS empresa_nombre, e.slug AS empresa_slug
@@ -84,4 +108,4 @@ function leerSucursal(empresaSlug, sucursalSlug) {
   `).get(empresaSlug, sucursalSlug);
 }
 
-module.exports = { db, leerSucursal, aHoraLocal };
+module.exports = { db, leerSucursal, aHoraLocal, aUtc };
