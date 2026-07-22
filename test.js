@@ -9,8 +9,10 @@ fs.rmSync(TMP, { force: true });
 process.env.DB_PATH = TMP;
 process.env.BASE_URL = 'http://localhost:9999';
 
-const { db, leerSucursal } = require('./db');
+const { db, leerSucursal, aHoraLocal } = require('./db');
 const { distanciaM, evaluarSitio, siguienteTipo, checar } = require('./checador');
+
+const FOTO = 'data:image/jpeg;base64,' + Buffer.from('selfie-de-prueba').toString('base64');
 const app = require('./server');
 
 const AUTH = 'Basic ' + Buffer.from('admin:ambar-rojo-2026').toString('base64');
@@ -36,6 +38,18 @@ function prueba(n, fn) {
     const suc = { lat: 16.75, lon: -93.11, radio_m: 120 };
     assert.strictEqual(evaluarSitio(suc, 16.7505, -93.11, 5), 1);
     assert.strictEqual(evaluarSitio(suc, 16.76, -93.11, 5), 0);
+  });
+  await prueba('la precisión del GPS expande el radio pero con techo de 300 m', () => {
+    const suc = { lat: 16.75, lon: -93.11, radio_m: 120 };
+    // A ~200 m: fuera con GPS preciso, dentro si el GPS trae ±100 m de error.
+    assert.strictEqual(evaluarSitio(suc, 16.7518, -93.11, 5), 0);
+    assert.strictEqual(evaluarSitio(suc, 16.7518, -93.11, 100), 1);
+    // A ~350 m: fuera aunque el error del GPS sea gigante (techo de 300 m).
+    assert.strictEqual(evaluarSitio(suc, 16.7532, -93.11, 400), 0);
+  });
+  await prueba('aHoraLocal convierte UTC a la zona de la sucursal', () => {
+    assert.strictEqual(aHoraLocal('2026-01-15 18:00:00', 'America/Mexico_City'), '2026-01-15 12:00:00');
+    assert.strictEqual(aHoraLocal('2026-01-15 18:00:00', 'America/Cancun'), '2026-01-15 13:00:00');
   });
 
   let empresaId, sucUrl;
@@ -84,13 +98,45 @@ function prueba(n, fn) {
     assert.strictEqual(lejos.en_sitio, 0, 'debería marcar fuera del área');
   });
 
+  await prueba('sin GPS válido exige selfie y la guarda como evidencia', async () => {
+    const suc = leerSucursal('taller-primo', 'centro');
+    db.prepare('INSERT INTO empleados (empresa_id, nombre, pin) VALUES (?, ?, ?)').run(empresaId, 'SinGps', '3131');
+    // Sin lectura GPS y sin foto: rechazada.
+    const sinFoto = checar({ sucursal: suc, pin: '3131' });
+    assert.ok(sinFoto.error && sinFoto.requiere_foto, 'debió pedir foto');
+    // Con precisión peor a 500 m tampoco pasa sin foto.
+    assert.ok(checar({ sucursal: suc, pin: '3131', lat: 16.7516, lon: -93.1161, precision: 800 }).requiere_foto);
+    // Basura en vez de imagen: rechazada.
+    assert.ok(checar({ sucursal: suc, pin: '3131', foto: 'hola' }).error);
+    // Con selfie: pasa, en_sitio queda desconocido y la foto queda guardada.
+    const conFoto = checar({ sucursal: suc, pin: '3131', foto: FOTO });
+    assert.strictEqual(conFoto.ok, true);
+    assert.strictEqual(conFoto.en_sitio, null);
+    const fila = db.prepare("SELECT id, foto FROM checadas WHERE foto IS NOT NULL ORDER BY id DESC LIMIT 1").get();
+    assert.strictEqual(fila.foto, FOTO);
+    // Y el panel puede verla (con auth) pero no sin auth.
+    const auth = 'Basic ' + Buffer.from('taller-primo:demo').toString('base64');
+    const rFoto = await get(`/taller-primo/api/checadas/${fila.id}/foto`, { headers: { Authorization: auth } });
+    assert.strictEqual(rFoto.status, 200);
+    assert.strictEqual(rFoto.headers.get('content-type').split(';')[0], 'image/jpeg');
+    assert.strictEqual((await get(`/taller-primo/api/checadas/${fila.id}/foto`)).status, 401);
+  });
+
+  await prueba('con GPS bueno NO se guarda foto aunque la manden', () => {
+    const suc = leerSucursal('taller-primo', 'centro');
+    const antes = db.prepare('SELECT COUNT(*) n FROM checadas WHERE foto IS NOT NULL').get().n;
+    const r = checar({ sucursal: suc, pin: '4821', lat: 16.7516, lon: -93.1161, precision: 10, foto: FOTO });
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM checadas WHERE foto IS NOT NULL').get().n, antes);
+  });
+
   await prueba('un olvido de salida NO invierte los días siguientes', () => {
     const suc = leerSucursal('taller-primo', 'centro');
     const emp = db.prepare('INSERT INTO empleados (empresa_id, nombre, pin) VALUES (?, ?, ?)').run(empresaId, 'Pedro', '5555');
-    const id = Number(emp.lastInsertRowid);
-    checar({ sucursal: suc, pin: '5555' });
-    db.prepare("UPDATE checadas SET created_at = datetime('now','localtime','-30 hours') WHERE empleado_id = ?").run(id);
-    assert.strictEqual(checar({ sucursal: suc, pin: '5555' }).tipo, 'entrada', 'el olvido invirtió la alternancia');
+    const id = Number(emp.lastInsertRowid); // las checadas de abajo llevan GPS bueno para no requerir foto
+    checar({ sucursal: suc, pin: '5555', lat: 16.7516, lon: -93.1161, precision: 10 });
+    db.prepare("UPDATE checadas SET created_at = datetime('now','-30 hours') WHERE empleado_id = ?").run(id);
+    assert.strictEqual(checar({ sucursal: suc, pin: '5555', lat: 16.7516, lon: -93.1161, precision: 10 }).tipo, 'entrada', 'el olvido invirtió la alternancia');
   });
 
   await prueba('un PIN equivocado no registra nada', () => {
@@ -118,12 +164,20 @@ function prueba(n, fn) {
   await prueba('el CSV sale con BOM y neutraliza fórmulas', async () => {
     const auth = 'Basic ' + Buffer.from('taller-primo:demo').toString('base64');
     db.prepare('INSERT INTO empleados (empresa_id, nombre, pin) VALUES (?, ?, ?)').run(empresaId, '=CMD|calc', '7777');
-    checar({ sucursal: leerSucursal('taller-primo', 'centro'), pin: '7777' });
+    checar({ sucursal: leerSucursal('taller-primo', 'centro'), pin: '7777', lat: 16.7516, lon: -93.1161, precision: 10 });
     const r = await get('/taller-primo/api/checadas.csv?dias=1', { headers: { Authorization: auth } });
     assert.strictEqual(r.status, 200);
     const bytes = Buffer.from(await r.arrayBuffer());
     assert.deepStrictEqual([...bytes.subarray(0, 3)], [0xEF, 0xBB, 0xBF], 'falta BOM');
     assert.ok(bytes.toString('utf8').includes('"\'=CMD|calc"'), 'no neutralizó la fórmula');
+  });
+
+  await prueba('el CSV sale en hora de la sucursal, no en UTC', async () => {
+    const auth = 'Basic ' + Buffer.from('taller-primo:demo').toString('base64');
+    const utc = db.prepare('SELECT created_at FROM checadas ORDER BY id DESC LIMIT 1').get().created_at;
+    const texto = Buffer.from(await (await get('/taller-primo/api/checadas.csv?dias=1', { headers: { Authorization: auth } })).arrayBuffer()).toString('utf8');
+    assert.ok(texto.includes(aHoraLocal(utc, 'America/Mexico_City')), 'no aparece la hora local');
+    assert.ok(!texto.includes('"' + utc + '"'), 'aparece la hora UTC cruda');
   });
 
   server.close(); db.close(); fs.rmSync(TMP, { force: true });

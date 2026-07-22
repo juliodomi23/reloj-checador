@@ -1,9 +1,15 @@
-const { db } = require('./db');
+const { db, aHoraLocal } = require('./db');
 const { esc, layout } = require('./ui');
 
 // Radio por defecto de la geocerca. El GPS de un celular en interiores se va
 // fácil 30-50 m: este número SE AJUSTA por sucursal, no se hardcodea.
 const RADIO_DEFAULT_M = 120;
+// Techo absoluto de la geocerca: radio + margen de error del GPS nunca pasa de aquí.
+const RADIO_MAX_M = 300;
+// Con peor precisión que esto el GPS no prueba nada: se exige selfie de evidencia.
+const PRECISION_MAX_M = 500;
+// Base64 de la selfie ya comprimida en el cliente (~60 KB); 2 MB es holgura, no meta.
+const FOTO_MAX_CHARS = 2 * 1024 * 1024;
 // Pasado esto, una entrada sin salida es un olvido, no un turno en curso.
 const HORAS_MAX_TURNO = 16;
 
@@ -24,10 +30,10 @@ function evaluarSitio(suc, lat, lon, precision) {
   if (suc.lat == null || suc.lon == null) return null;
   if (lat == null || lon == null) return null;
   const radio = Number(suc.radio_m) || RADIO_DEFAULT_M;
-  // La precisión del navegador se suma al radio: castigar un GPS impreciso genera
-  // falsos positivos, no disciplina.
-  const holgura = Math.min(Number(precision) || 0, 200);
-  return distanciaM(lat, lon, suc.lat, suc.lon) <= radio + holgura ? 1 : 0;
+  // La precisión del navegador expande el radio (castigar un GPS impreciso genera
+  // falsos rechazos), pero con techo para no volver la geocerca inútil.
+  const radioEfectivo = Math.min(radio + (Number(precision) || 0), Math.max(radio, RADIO_MAX_M));
+  return distanciaM(lat, lon, suc.lat, suc.lon) <= radioEfectivo ? 1 : 0;
 }
 
 /**
@@ -37,7 +43,7 @@ function evaluarSitio(suc, lat, lon, precision) {
  */
 function siguienteTipo(empleadoId, horasMax = HORAS_MAX_TURNO) {
   const ultima = db.prepare(`
-    SELECT tipo, (julianday('now','localtime') - julianday(created_at)) * 24 AS horas
+    SELECT tipo, (julianday('now') - julianday(created_at)) * 24 AS horas
     FROM checadas WHERE empleado_id = ? ORDER BY id DESC LIMIT 1
   `).get(empleadoId);
   if (!ultima || ultima.tipo === 'salida') return 'entrada';
@@ -50,25 +56,48 @@ function empleadoPorPin(empresaId, pin) {
   ).get(empresaId, String(pin || ''));
 }
 
+/**
+ * ¿La checada necesita selfie de evidencia? Solo cuando la sucursal tiene
+ * geocerca y el GPS no sirve para verificarla: sin lectura (permiso denegado o
+ * timeout) o con precisión peor que PRECISION_MAX_M.
+ */
+function requiereFoto(sucursal, lat, lon, precision) {
+  if (sucursal.lat == null || sucursal.lon == null) return false;
+  if (lat == null || lon == null) return true;
+  return Number(precision) > PRECISION_MAX_M;
+}
+
 /** Registra la checada. Devuelve { ok, empleado, tipo, en_sitio, hora } o { error }. */
-function checar({ sucursal, pin, lat, lon, precision }) {
+function checar({ sucursal, pin, lat, lon, precision, foto }) {
   const empleado = empleadoPorPin(sucursal.empresa_id, pin);
   if (!empleado) return { error: 'PIN no reconocido' };
+
+  const conFoto = requiereFoto(sucursal, lat, lon, precision);
+  if (conFoto) {
+    // No se confía en el `required` del frontend: esta es la barrera real.
+    if (!foto) return { error: 'Sin ubicación válida: toma una selfie para registrar tu checada', requiere_foto: true };
+    if (typeof foto !== 'string' || !/^data:image\/(jpeg|png|webp);base64,/.test(foto) || foto.length > FOTO_MAX_CHARS) {
+      return { error: 'Foto inválida' };
+    }
+  }
 
   const tipo = siguienteTipo(empleado.id);
   const en_sitio = evaluarSitio(sucursal, lat, lon, precision);
 
+  // created_at explícito en UTC: no se depende del DEFAULT (una BD creada con la
+  // versión vieja del esquema traía 'localtime').
   const r = db.prepare(`
-    INSERT INTO checadas (empleado_id, sucursal_id, tipo, lat, lon, precision_m, en_sitio)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(empleado.id, sucursal.id, tipo, lat ?? null, lon ?? null, precision ?? null, en_sitio);
+    INSERT INTO checadas (empleado_id, sucursal_id, tipo, lat, lon, precision_m, en_sitio, foto, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+  `).run(empleado.id, sucursal.id, tipo, lat ?? null, lon ?? null, precision ?? null, en_sitio,
+         conFoto ? foto : null);
 
   // Se devuelve la hora GUARDADA (servidor), no la del celular: un reloj desfasado
   // haría ver una hora al empleado y otra en el reporte de nómina.
   const { created_at } = db.prepare('SELECT created_at FROM checadas WHERE id = ?')
     .get(Number(r.lastInsertRowid));
 
-  return { ok: true, empleado: empleado.nombre, tipo, en_sitio, hora: created_at };
+  return { ok: true, empleado: empleado.nombre, tipo, en_sitio, hora: aHoraLocal(created_at, sucursal.timezone) };
 }
 
 // ---------- Página que ve el empleado ----------
@@ -82,6 +111,11 @@ function renderChecador(suc) {
         <input id="pin" name="pin" type="text" inputmode="numeric" pattern="[0-9]*"
                maxlength="8" required autofocus autocomplete="off" placeholder="••••"
                style="font-size:1.5rem;letter-spacing:.3em;text-align:center">
+        <div id="df" style="display:none">
+          <label for="foto">Selfie de evidencia</label>
+          <input id="foto" name="foto" type="file" accept="image/*" capture="user">
+          <p class="muted">No pudimos verificar tu ubicación. Tómate una selfie para registrar tu checada.</p>
+        </div>
         <button id="b" type="submit">Checar</button>
       </form>
       <div id="m" class="msg"></div>
@@ -89,7 +123,9 @@ function renderChecador(suc) {
     </div>`;
 
   const script = `
-    const f=document.getElementById('f'),b=document.getElementById('b'),m=document.getElementById('m');
+    const HAY_GEOCERCA=${suc.lat != null && suc.lon != null};
+    const f=document.getElementById('f'),b=document.getElementById('b'),m=document.getElementById('m'),
+          df=document.getElementById('df'),foto=document.getElementById('foto');
     function ubicacion(){
       return new Promise(r=>{
         if(!navigator.geolocation) return r({});
@@ -98,33 +134,54 @@ function renderChecador(suc) {
           ()=>r({}), {enableHighAccuracy:true,timeout:8000,maximumAge:0});
       });
     }
+    // La foto se reduce en el cliente (máx 640 px, JPEG 0.7): ~60 KB en vez de varios MB.
+    async function comprimirFoto(file){
+      const img=await createImageBitmap(file);
+      const esc=Math.min(1,640/Math.max(img.width,img.height));
+      const c=document.createElement('canvas');
+      c.width=Math.round(img.width*esc); c.height=Math.round(img.height*esc);
+      c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+      return c.toDataURL('image/jpeg',0.7);
+    }
+    function pedirFoto(){
+      df.style.display='block'; foto.required=true;
+      m.className='msg show bad';
+      m.textContent='No pudimos verificar tu ubicación. Tómate una selfie y vuelve a presionar Checar.';
+    }
     f.addEventListener('submit',async e=>{
       e.preventDefault(); b.disabled=true; b.textContent='Registrando…'; m.className='msg';
-      const geo=await ubicacion();
       try{
+        const geo=await ubicacion();
+        // Sin lectura GPS o con precisión peor a 500 m no se puede verificar la
+        // geocerca: se exige selfie de evidencia.
+        const necesitaFoto=HAY_GEOCERCA&&(geo.lat==null||geo.precision>500);
+        if(necesitaFoto&&!foto.files[0]){pedirFoto();return;}
+        const body={pin:document.getElementById('pin').value,...geo};
+        if(necesitaFoto) body.foto=await comprimirFoto(foto.files[0]);
         const r=await fetch(location.pathname+'/checar',{method:'POST',
           headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({pin:document.getElementById('pin').value,...geo})});
+          body:JSON.stringify(body)});
         const d=await r.json();
-        if(!r.ok) throw new Error(d.error||'Error');
+        if(!r.ok){if(d.requiere_foto){pedirFoto();return;}throw new Error(d.error||'Error');}
         const hora=(d.hora||'').slice(11,16);
         m.className='msg show ok';
         m.textContent=d.tipo.toUpperCase()+' registrada · '+d.empleado+' · '+hora+
           (d.en_sitio===0?' (fuera del área)':'');
-        f.reset();
+        f.reset(); df.style.display='none'; foto.required=false;
       }catch(err){
         m.className='msg show bad';
         m.textContent=/fetch|network/i.test(err.message)
           ? 'Sin conexión. Revisa tu señal e intenta de nuevo.' : err.message;
+      }finally{
+        b.disabled=false; b.textContent='Checar';
+        document.getElementById('pin').focus();
       }
-      b.disabled=false; b.textContent='Checar';
-      document.getElementById('pin').focus();
     });`;
 
   return layout({ titulo: 'Checar — ' + suc.empresa_nombre, body, script });
 }
 
 module.exports = {
-  renderChecador, checar, distanciaM, evaluarSitio, siguienteTipo,
-  RADIO_DEFAULT_M, HORAS_MAX_TURNO,
+  renderChecador, checar, distanciaM, evaluarSitio, siguienteTipo, requiereFoto,
+  RADIO_DEFAULT_M, RADIO_MAX_M, PRECISION_MAX_M, HORAS_MAX_TURNO,
 };

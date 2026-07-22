@@ -1,5 +1,5 @@
 const express = require('express');
-const { db, leerSucursal } = require('./db');
+const { db, leerSucursal, aHoraLocal } = require('./db');
 const { esc, layout } = require('./ui');
 const { renderChecador, checar } = require('./checador');
 const { limitador } = require('./limite');
@@ -12,7 +12,10 @@ const SUPERADMIN_PASS = process.env.SUPERADMIN_PASS || 'ambar-rojo-2026';
 
 const app = express();
 app.set('trust proxy', 1);
-app.use(express.json({ limit: '32kb' }));
+// 32kb para todo, salvo /checar que puede traer una selfie base64 de evidencia.
+const jsonChico = express.json({ limit: '32kb' });
+const jsonFoto = express.json({ limit: '3mb' });
+app.use((req, res, next) => (req.path.endsWith('/checar') ? jsonFoto : jsonChico)(req, res, next));
 
 // ---------- Auth ----------
 function credenciales(req) {
@@ -55,8 +58,8 @@ const limiteChecadas = limitador({ max: 20, ventanaMs: 15 * 60 * 1000 });
 app.post('/:empresa/:sucursal/checar', (req, res) => {
   const suc = leerSucursal(req.params.empresa, req.params.sucursal);
   if (!suc) return res.status(404).json({ error: 'Sucursal no válida' });
-  const { pin, lat, lon, precision } = req.body || {};
-  const r = checar({ sucursal: suc, pin, lat, lon, precision });
+  const { pin, lat, lon, precision, foto } = req.body || {};
+  const r = checar({ sucursal: suc, pin, lat, lon, precision, foto });
   if (r.error) {
     if (limiteChecadas(`${req.ip}|${suc.id}`)) return res.status(429).json({ error: 'Demasiados intentos. Espera 15 minutos.' });
     return res.status(400).json(r);
@@ -91,12 +94,15 @@ app.post('/superadmin/api/empresas/:id/sucursales', (req, res) => {
   const empresaId = Number(req.params.id);
   if (!db.prepare('SELECT 1 FROM empresas WHERE id = ?').get(empresaId)) return res.status(404).json({ error: 'Empresa no existe' });
   const slug = limpiarSlug(req.body?.slug);
-  const { nombre, lat, lon, radio_m } = req.body || {};
+  const { nombre, lat, lon, radio_m, timezone } = req.body || {};
   if (!slug || !nombre) return res.status(400).json({ error: 'slug y nombre son requeridos' });
+  const tz = timezone || 'America/Mexico_City';
+  try { new Intl.DateTimeFormat('sv-SE', { timeZone: tz }); }
+  catch { return res.status(400).json({ error: 'timezone inválida (usa formato IANA, ej. America/Mexico_City)' }); }
   try {
-    const r = db.prepare(`INSERT INTO sucursales (empresa_id, slug, nombre, lat, lon, radio_m)
-      VALUES (?, ?, ?, ?, ?, ?)`).run(empresaId, slug, nombre,
-      lat != null ? Number(lat) : null, lon != null ? Number(lon) : null, radio_m != null ? Number(radio_m) : null);
+    const r = db.prepare(`INSERT INTO sucursales (empresa_id, slug, nombre, lat, lon, radio_m, timezone)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(empresaId, slug, nombre,
+      lat != null ? Number(lat) : null, lon != null ? Number(lon) : null, radio_m != null ? Number(radio_m) : null, tz);
     res.status(201).json({ id: Number(r.lastInsertRowid), url: `/${db.prepare('SELECT slug FROM empresas WHERE id=?').get(empresaId).slug}/${slug}` });
   } catch { res.status(409).json({ error: 'Ese slug de sucursal ya existe en la empresa' }); }
 });
@@ -135,29 +141,43 @@ app.delete('/:empresa/api/empleados/:id', authEmpresa, (req, res) => {
 
 app.get('/:empresa/api/checadas', authEmpresa, (req, res) => {
   const dias = Math.min(Math.max(Number(req.query.dias) || 7, 1), 90);
-  res.json(db.prepare(`
-    SELECT c.tipo, c.created_at, c.en_sitio, e.nombre AS empleado, s.nombre AS sucursal
+  const filas = db.prepare(`
+    SELECT c.id, c.tipo, c.created_at, c.en_sitio, (c.foto IS NOT NULL) AS tiene_foto,
+      e.nombre AS empleado, s.nombre AS sucursal, s.timezone
     FROM checadas c
     JOIN empleados e ON e.id = c.empleado_id
     JOIN sucursales s ON s.id = c.sucursal_id
-    WHERE e.empresa_id = ? AND c.created_at >= datetime('now','localtime', ?)
+    WHERE e.empresa_id = ? AND c.created_at >= datetime('now', ?)
     ORDER BY c.id DESC LIMIT 500
-  `).all(req.empresa.id, `-${dias} days`));
+  `).all(req.empresa.id, `-${dias} days`);
+  res.json(filas.map(f => ({ ...f, created_at: aHoraLocal(f.created_at, f.timezone) })));
+});
+
+// Evidencia fotográfica de una checada sin GPS válido.
+app.get('/:empresa/api/checadas/:id/foto', authEmpresa, (req, res) => {
+  const c = db.prepare(`
+    SELECT c.foto FROM checadas c JOIN empleados e ON e.id = c.empleado_id
+    WHERE c.id = ? AND e.empresa_id = ?
+  `).get(Number(req.params.id), req.empresa.id);
+  const [, mime, b64] = String(c?.foto || '').match(/^data:(image\/\w+);base64,(.+)$/) || [];
+  if (!b64) return res.status(404).send('Sin foto');
+  res.type(mime).send(Buffer.from(b64, 'base64'));
 });
 
 app.get('/:empresa/api/checadas.csv', authEmpresa, (req, res) => {
   const dias = Math.min(Math.max(Number(req.query.dias) || 30, 1), 90);
   const filas = db.prepare(`
-    SELECT e.nombre AS empleado, c.tipo, c.created_at, s.nombre AS sucursal, c.en_sitio
+    SELECT e.nombre AS empleado, c.tipo, c.created_at, s.nombre AS sucursal, s.timezone, c.en_sitio
     FROM checadas c JOIN empleados e ON e.id = c.empleado_id JOIN sucursales s ON s.id = c.sucursal_id
-    WHERE e.empresa_id = ? AND c.created_at >= datetime('now','localtime', ?)
+    WHERE e.empresa_id = ? AND c.created_at >= datetime('now', ?)
     ORDER BY e.nombre, c.id
   `).all(req.empresa.id, `-${dias} days`);
   // Un nombre que empiece con = o + se ejecuta como fórmula al abrir en Excel.
   const celda = v => { const s = String(v ?? ''); return `"${(/^[=+\-@]/.test(s) ? "'" + s : s).replace(/"/g, '""')}"`; };
   const sitio = v => (v === 1 ? 'en sitio' : v === 0 ? 'fuera del area' : 'sin ubicacion');
   const csv = ['Empleado;Tipo;Fecha;Sucursal;Ubicacion']
-    .concat(filas.map(f => [f.empleado, f.tipo, f.created_at, f.sucursal, sitio(f.en_sitio)].map(celda).join(';')))
+    // La BD guarda UTC; el CSV sale en la hora de la sucursal para que nómina lo lea directo.
+    .concat(filas.map(f => [f.empleado, f.tipo, aHoraLocal(f.created_at, f.timezone), f.sucursal, sitio(f.en_sitio)].map(celda).join(';')))
     .join('\r\n');
   res.type('text/csv; charset=utf-8')
      .set('Content-Disposition', `attachment; filename="asistencia-${req.empresa.slug}.csv"`)
@@ -172,8 +192,7 @@ if (require.main === module) {
     console.error('✗ SUPERADMIN_PASS vacía o con un valor por defecto inseguro. Defínela en EasyPanel.');
     process.exit(1);
   }
-  if (!process.env.TZ) console.warn('⚠️  TZ sin definir: las fechas se guardarán en UTC (6 h adelante de Tuxtla).');
-  app.listen(PORT, () => console.log(`reloj-checador escuchando en http://localhost:${PORT} (TZ=${process.env.TZ || 'sin definir'})`));
+  app.listen(PORT, () => console.log(`reloj-checador escuchando en http://localhost:${PORT} (fechas en UTC, se convierten por sucursal)`));
 }
 
 module.exports = app;

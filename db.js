@@ -17,7 +17,7 @@ db.exec(`
     nombre     TEXT NOT NULL,
     admin_pass TEXT NOT NULL,
     activo     INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
   CREATE TABLE IF NOT EXISTS sucursales (
@@ -28,6 +28,7 @@ db.exec(`
     lat        REAL,
     lon        REAL,
     radio_m    INTEGER,
+    timezone   TEXT NOT NULL DEFAULT 'America/Mexico_City',
     activo     INTEGER NOT NULL DEFAULT 1,
     UNIQUE (empresa_id, slug)
   );
@@ -38,7 +39,7 @@ db.exec(`
     nombre     TEXT NOT NULL,
     pin        TEXT NOT NULL,
     activo     INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (empresa_id, pin)
   );
 
@@ -51,10 +52,25 @@ db.exec(`
     lon          REAL,
     precision_m  REAL,
     en_sitio     INTEGER,
-    created_at   TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    foto         TEXT,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_checadas_emp ON checadas(empleado_id, created_at);
 `);
+
+// Migración best-effort: en BD nuevas estas columnas ya existen y el ALTER falla.
+for (const sql of [
+  "ALTER TABLE sucursales ADD COLUMN timezone TEXT NOT NULL DEFAULT 'America/Mexico_City'",
+  'ALTER TABLE checadas ADD COLUMN foto TEXT',
+]) { try { db.exec(sql); } catch {} }
+
+/** 'YYYY-MM-DD HH:MM:SS' en UTC → misma forma en la zona horaria dada. */
+function aHoraLocal(utc, tz) {
+  if (!utc) return '';
+  return new Intl.DateTimeFormat('sv-SE', {
+    timeZone: tz || 'America/Mexico_City', dateStyle: 'short', timeStyle: 'medium',
+  }).format(new Date(utc.replace(' ', 'T') + 'Z'));
+}
 
 function leerSucursal(empresaSlug, sucursalSlug) {
   return db.prepare(`
@@ -64,4 +80,4 @@ function leerSucursal(empresaSlug, sucursalSlug) {
   `).get(empresaSlug, sucursalSlug);
 }
 
-module.exports = { db, leerSucursal };
+module.exports = { db, leerSucursal, aHoraLocal };

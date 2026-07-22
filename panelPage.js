@@ -37,7 +37,9 @@ function renderPanel(empresa) {
     async function cargarChecadas(){
       $('csv').href='/'+SLUG+'/api/checadas.csv?dias='+$('dias').value;
       const d=await api('/checadas?dias='+$('dias').value);
-      $('tchecadas').innerHTML=d.map(c=>'<tr><td>'+c.empleado+'</td><td>'+c.tipo+'</td><td>'+c.created_at+'</td><td class="'+(c.en_sitio===0?'bad':'ok')+'">'+(c.en_sitio===1?'✓':c.en_sitio===0?'fuera':'—')+'</td></tr>').join('')||vacio(4,'Sin checadas');
+      const sitio=c=>c.en_sitio===1?'✓':c.en_sitio===0?'fuera'
+        :c.tiene_foto?'<a href="/'+SLUG+'/api/checadas/'+c.id+'/foto" target="_blank">📷 sin GPS, ver foto</a>':'—';
+      $('tchecadas').innerHTML=d.map(c=>'<tr><td>'+c.empleado+'</td><td>'+c.tipo+'</td><td>'+c.created_at+'</td><td class="'+(c.en_sitio===0?'bad':'ok')+'">'+sitio(c)+'</td></tr>').join('')||vacio(4,'Sin checadas');
     }
     async function cargarEmpleados(){
       const d=await api('/empleados');
