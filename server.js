@@ -44,13 +44,6 @@ function paginaSimple(titulo, mensaje) {
   return layout({ titulo, body: `<div class="card"><h1>${esc(titulo)}</h1><p class="muted">${esc(mensaje)}</p></div>` });
 }
 
-// ---------- Página pública del empleado ----------
-app.get('/:empresa/:sucursal', (req, res) => {
-  const suc = leerSucursal(req.params.empresa, req.params.sucursal);
-  if (!suc) return res.status(404).send(paginaSimple('Sucursal no encontrada', 'Esta etiqueta no está configurada. Avisa a la empresa.'));
-  res.send(renderChecador(suc));
-});
-
 // El PIN son 4 dígitos: sin límite, se rompe por fuerza bruta. Solo los fallos
 // consumen cuota, para no bloquear la puerta en hora pico.
 const limiteChecadas = limitador({ max: 20, ventanaMs: 15 * 60 * 1000 });
@@ -185,6 +178,15 @@ app.get('/:empresa/api/checadas.csv', authEmpresa, (req, res) => {
 });
 
 app.get('/salud', (req, res) => res.json({ ok: true, empresas: db.prepare('SELECT COUNT(*) n FROM empresas').get().n }));
+
+// ---------- Página pública del empleado ----------
+// Va al final: es una ruta comodín /:empresa/:sucursal que si se registra antes
+// intercepta /panel, /superadmin, /api/* interpretándolos como nombre de sucursal.
+app.get('/:empresa/:sucursal', (req, res) => {
+  const suc = leerSucursal(req.params.empresa, req.params.sucursal);
+  if (!suc) return res.status(404).send(paginaSimple('Sucursal no encontrada', 'Esta etiqueta no está configurada. Avisa a la empresa.'));
+  res.send(renderChecador(suc));
+});
 
 const CLAVES_INSEGURAS = ['', 'ambar-rojo-2026', 'cambia-esta-contrasena'];
 if (require.main === module) {

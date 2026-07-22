@@ -33,10 +33,11 @@ function renderSuperadmin() {
       <label style="margin-top:14px">URL para grabar en la etiqueta NFC</label>
       <input id="surl" readonly placeholder="Aparece aquí al crear la sucursal">
       <div id="ms" class="msg"></div>
+      <div id="sucursales" class="muted" style="margin-top:10px"></div>
     </div>
 
     <div class="card"><h2>Empresas</h2>
-      <table><thead><tr><th>Empresa</th><th>Slug</th><th>Sucursales</th><th>Empleados</th></tr></thead>
+      <table><thead><tr><th>Empresa</th><th>Slug</th><th>Sucursales</th><th>Empleados</th><th>Panel</th></tr></thead>
       <tbody id="tabla"></tbody></table>
     </div>`;
 
@@ -45,12 +46,22 @@ function renderSuperadmin() {
     const $=id=>document.getElementById(id);
     function aviso(el,t,ok){el.className='msg show '+(ok?'ok':'bad');el.textContent=t;}
     async function api(u,o){const r=await fetch(u,{headers:{'Content-Type':'application/json'},...o});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Error '+r.status);return d;}
+    let empresas=[];
     async function cargar(){
-      const e=await api('/superadmin/api/empresas');
-      $('resumen').textContent=e.length+' empresas';
-      $('sempresa').innerHTML=e.map(x=>'<option value="'+x.id+'">'+x.nombre+'</option>').join('');
-      $('tabla').innerHTML=e.map(x=>'<tr><td>'+x.nombre+'</td><td><code>'+x.slug+'</code></td><td>'+x.sucursales+'</td><td>'+x.empleados+'</td></tr>').join('')||'<tr><td colspan="4" class="muted">Sin empresas</td></tr>';
+      empresas=await api('/superadmin/api/empresas');
+      $('resumen').textContent=empresas.length+' empresas';
+      $('sempresa').innerHTML=empresas.map(x=>'<option value="'+x.id+'">'+x.nombre+'</option>').join('');
+      $('tabla').innerHTML=empresas.map(x=>'<tr><td>'+x.nombre+'</td><td><code>'+x.slug+'</code></td><td>'+x.sucursales+'</td><td>'+x.empleados+'</td><td><a href="'+BASE+'/'+x.slug+'/panel" target="_blank">abrir</a></td></tr>').join('')||'<tr><td colspan="5" class="muted">Sin empresas</td></tr>';
+      await cargarSucursales();
     }
+    async function cargarSucursales(){
+      const id=$('sempresa').value;
+      if(!id){$('sucursales').innerHTML='';return;}
+      const emp=empresas.find(x=>String(x.id)===String(id));
+      const subs=await api('/superadmin/api/empresas/'+id+'/sucursales');
+      $('sucursales').innerHTML=subs.length?('Sucursales de '+emp.nombre+':<br>'+subs.map(s=>s.nombre+': <a href="'+BASE+'/'+emp.slug+'/'+s.slug+'" target="_blank">'+BASE+'/'+emp.slug+'/'+s.slug+'</a>').join('<br>')):'Sin sucursales todavía';
+    }
+    $('sempresa').addEventListener('change',cargarSucursales);
     async function crearEmpresa(){
       try{await api('/superadmin/api/empresas',{method:'POST',body:JSON.stringify({slug:$('cslug').value,nombre:$('cnom').value,admin_pass:$('cpass').value})});
         aviso($('mc'),'Empresa creada',true);cargar();}catch(e){aviso($('mc'),e.message,false);}
