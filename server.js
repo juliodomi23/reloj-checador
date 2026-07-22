@@ -69,7 +69,7 @@ app.get('/superadmin/api/empresas', (req, res) => {
     SELECT e.id, e.slug, e.nombre,
       (SELECT COUNT(*) FROM sucursales s WHERE s.empresa_id = e.id) AS sucursales,
       (SELECT COUNT(*) FROM empleados m WHERE m.empresa_id = e.id AND m.activo = 1) AS empleados
-    FROM empresas e ORDER BY e.created_at DESC
+    FROM empresas e WHERE e.activo = 1 ORDER BY e.created_at DESC
   `).all());
 });
 
