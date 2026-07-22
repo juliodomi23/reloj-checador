@@ -89,6 +89,31 @@ function prueba(n, fn) {
     assert.strictEqual(ok.status, 201);
   });
 
+  let sucursalDosId;
+  await prueba('la empresa puede crear y editar sus propias sucursales desde su panel (con el punto del mapa)', async () => {
+    const auth = 'Basic ' + Buffer.from('taller-primo:demo').toString('base64');
+    const jsonEmp = b => ({ method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+    const sinPunto = await get('/taller-primo/api/sucursales', jsonEmp({ slug: 'norte', nombre: 'Sucursal Norte' }));
+    assert.strictEqual(sinPunto.status, 400, 'sin lat/lon debería rechazar (hay que tocar el mapa)');
+    const r = await get('/taller-primo/api/sucursales', jsonEmp({ slug: 'norte', nombre: 'Sucursal Norte', lat: 16.76, lon: -93.12, radio_m: 150 }));
+    assert.strictEqual(r.status, 201);
+    sucursalDosId = (await r.json()).id;
+    const lista = await (await get('/taller-primo/api/sucursales', { headers: { Authorization: auth } })).json();
+    assert.ok(lista.some(s => s.slug === 'norte' && s.radio_m === 150));
+    const edit = await get(`/taller-primo/api/sucursales/${sucursalDosId}`, { method: 'PUT', headers: { Authorization: auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ lat: 16.761, lon: -93.121, radio_m: 200 }) });
+    assert.strictEqual(edit.status, 200);
+    const lista2 = await (await get('/taller-primo/api/sucursales', { headers: { Authorization: auth } })).json();
+    assert.strictEqual(lista2.find(s => s.id === sucursalDosId).radio_m, 200, 'la edición del radio no se guardó');
+  });
+
+  await prueba('un empleado se puede asignar a una sucursal y se ve en el listado', async () => {
+    const auth = 'Basic ' + Buffer.from('taller-primo:demo').toString('base64');
+    const r = await get('/taller-primo/api/empleados', { method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ nombre: 'Juan Norte', pin: '6060', sucursal_id: sucursalDosId }) });
+    assert.strictEqual(r.status, 201);
+    const lista = await (await get('/taller-primo/api/empleados', { headers: { Authorization: auth } })).json();
+    assert.strictEqual(lista.find(e => e.nombre === 'Juan Norte').sucursal_nombre, 'Sucursal Norte');
+  });
+
   await prueba('checar alterna entrada->salida y respeta la geocerca', async () => {
     const suc = leerSucursal('taller-primo', 'centro'); // sucursal en 16.7516,-93.1161
     // Empleado ~44 m de la sucursal (dentro del radio 120).

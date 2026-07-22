@@ -34,12 +34,13 @@ db.exec(`
   );
 
   CREATE TABLE IF NOT EXISTS empleados (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    empresa_id INTEGER NOT NULL REFERENCES empresas(id),
-    nombre     TEXT NOT NULL,
-    pin        TEXT NOT NULL,
-    activo     INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    empresa_id  INTEGER NOT NULL REFERENCES empresas(id),
+    sucursal_id INTEGER REFERENCES sucursales(id),
+    nombre      TEXT NOT NULL,
+    pin         TEXT NOT NULL,
+    activo      INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (empresa_id, pin)
   );
 
@@ -62,6 +63,7 @@ db.exec(`
 for (const sql of [
   "ALTER TABLE sucursales ADD COLUMN timezone TEXT NOT NULL DEFAULT 'America/Mexico_City'",
   'ALTER TABLE checadas ADD COLUMN foto TEXT',
+  'ALTER TABLE empleados ADD COLUMN sucursal_id INTEGER REFERENCES sucursales(id)',
 ]) { try { db.exec(sql); } catch {} }
 
 /** 'YYYY-MM-DD HH:MM:SS' en UTC → misma forma en la zona horaria dada. */

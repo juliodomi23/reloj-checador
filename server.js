@@ -119,21 +119,51 @@ app.delete('/superadmin/api/empresas/:id/sucursales/:sid', (req, res) => {
 // ---------- Panel de la empresa ----------
 app.get('/:empresa/panel', authEmpresa, (req, res) => res.send(renderPanel(req.empresa)));
 
+app.get('/:empresa/api/sucursales', authEmpresa, (req, res) => {
+  res.json(db.prepare('SELECT id, slug, nombre, lat, lon, radio_m FROM sucursales WHERE empresa_id = ? AND activo = 1 ORDER BY nombre')
+    .all(req.empresa.id));
+});
+
+// La empresa pone el punto tocando el mapa (en vez de escribir lat/lon a mano),
+// así se evita perder la geocerca por una coordenada mal tecleada.
+app.post('/:empresa/api/sucursales', authEmpresa, (req, res) => {
+  const slug = limpiarSlug(req.body?.slug);
+  const { nombre, lat, lon, radio_m } = req.body || {};
+  if (!slug || !nombre) return res.status(400).json({ error: 'slug y nombre son requeridos' });
+  if (lat == null || lon == null) return res.status(400).json({ error: 'Toca el mapa para poner la ubicación' });
+  try {
+    const r = db.prepare(`INSERT INTO sucursales (empresa_id, slug, nombre, lat, lon, radio_m)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(req.empresa.id, slug, nombre, Number(lat), Number(lon), radio_m != null ? Number(radio_m) : null);
+    res.status(201).json({ id: Number(r.lastInsertRowid), url: `/${req.empresa.slug}/${slug}` });
+  } catch { res.status(409).json({ error: 'Ese slug de sucursal ya existe en tu empresa' }); }
+});
+
+app.put('/:empresa/api/sucursales/:id', authEmpresa, (req, res) => {
+  const { nombre, lat, lon, radio_m } = req.body || {};
+  if (lat == null || lon == null) return res.status(400).json({ error: 'Toca el mapa para poner la ubicación' });
+  const r = db.prepare(`UPDATE sucursales SET lat = ?, lon = ?, radio_m = ?, nombre = COALESCE(?, nombre)
+    WHERE id = ? AND empresa_id = ?`)
+    .run(Number(lat), Number(lon), radio_m != null ? Number(radio_m) : null, nombre || null, Number(req.params.id), req.empresa.id);
+  res.json({ ok: r.changes > 0 });
+});
+
 app.get('/:empresa/api/empleados', authEmpresa, (req, res) => {
   res.json(db.prepare(`
-    SELECT e.id, e.nombre, e.pin, e.activo,
+    SELECT e.id, e.nombre, e.pin, e.activo, e.sucursal_id, s.nombre AS sucursal_nombre,
       (SELECT tipo FROM checadas c WHERE c.empleado_id = e.id ORDER BY c.id DESC LIMIT 1) AS ultimo
-    FROM empleados e WHERE e.empresa_id = ? ORDER BY e.nombre
+    FROM empleados e LEFT JOIN sucursales s ON s.id = e.sucursal_id
+    WHERE e.empresa_id = ? ORDER BY e.nombre
   `).all(req.empresa.id));
 });
 
 app.post('/:empresa/api/empleados', authEmpresa, (req, res) => {
   const nombre = String(req.body?.nombre || '').trim();
   const pin = String(req.body?.pin || '').trim();
+  const sucursal_id = req.body?.sucursal_id ? Number(req.body.sucursal_id) : null;
   if (!nombre) return res.status(400).json({ error: 'nombre requerido' });
   if (!/^\d{4,8}$/.test(pin)) return res.status(400).json({ error: 'el PIN debe tener entre 4 y 8 dígitos' });
   try {
-    const r = db.prepare('INSERT INTO empleados (empresa_id, nombre, pin) VALUES (?, ?, ?)').run(req.empresa.id, nombre, pin);
+    const r = db.prepare('INSERT INTO empleados (empresa_id, nombre, pin, sucursal_id) VALUES (?, ?, ?, ?)').run(req.empresa.id, nombre, pin, sucursal_id);
     res.status(201).json({ id: Number(r.lastInsertRowid) });
   } catch { res.status(409).json({ error: 'Ese PIN ya está en uso en tu empresa' }); }
 });
