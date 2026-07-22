@@ -162,7 +162,7 @@ function renderPanel(empresa) {
     }
     async function baja(id){if(!confirm('¿Dar de baja a este empleado?'))return;await api('/empleados/'+id,{method:'DELETE'});cargarEmpleados();}
     async function borrarEmpleado(id){
-      if(!confirm('¿Borrar definitivamente a este empleado? No se puede deshacer.'))return;
+      if(!confirm('¿Borrar definitivamente a este empleado? También se borran todas sus checadas registradas. No se puede deshacer.'))return;
       try{await api('/empleados/'+id+'/permanente',{method:'DELETE'});cargarEmpleados();}catch(e){alert(e.message);}
     }
 

@@ -175,7 +175,7 @@ function prueba(n, fn) {
     assert.strictEqual(checar({ sucursal: suc, pin: '5555', lat: 16.7516, lon: -93.1161, precision: 10 }).tipo, 'entrada', 'el olvido invirtió la alternancia');
   });
 
-  await prueba('borrado definitivo: solo tras baja, y bloqueado si tiene checadas', async () => {
+  await prueba('borrado definitivo: solo tras baja, y se lleva sus checadas', async () => {
     const auth = 'Basic ' + Buffer.from('taller-primo:demo').toString('base64');
     const cabecera = { Authorization: auth, 'Content-Type': 'application/json' };
     const r = await get('/taller-primo/api/empleados', { method: 'POST', headers: cabecera, body: JSON.stringify({ nombre: 'Sin Uso', pin: '2222' }) });
@@ -190,12 +190,14 @@ function prueba(n, fn) {
     const listaTrasBorrar = await (await get('/taller-primo/api/empleados', { headers: cabecera })).json();
     assert.ok(!listaTrasBorrar.some(e => e.id === id), 'debió desaparecer de la lista');
 
-    // Pedro (pin 5555) ya tiene checadas de la prueba anterior.
+    // Pedro (pin 5555) ya tiene checadas de la prueba anterior: al borrarlo
+    // definitivamente, también deben desaparecer sus checadas.
     const conHistorial = await get('/taller-primo/api/empleados', { headers: cabecera });
     const pedro = (await conHistorial.json()).find(e => e.nombre === 'Pedro');
     await get(`/taller-primo/api/empleados/${pedro.id}`, { method: 'DELETE', headers: cabecera });
-    const bloqueado = await get(`/taller-primo/api/empleados/${pedro.id}/permanente`, { method: 'DELETE', headers: cabecera });
-    assert.strictEqual(bloqueado.status, 409, 'no debería borrar a alguien con checadas registradas');
+    const permanente = await get(`/taller-primo/api/empleados/${pedro.id}/permanente`, { method: 'DELETE', headers: cabecera });
+    assert.strictEqual(permanente.status, 200);
+    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM checadas WHERE empleado_id = ?').get(pedro.id).n, 0, 'debió borrar también sus checadas');
   });
 
   await prueba('un PIN equivocado no registra nada', () => {
