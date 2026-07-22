@@ -104,6 +104,18 @@ app.get('/superadmin/api/empresas/:id/sucursales', (req, res) => {
   res.json(db.prepare('SELECT id, slug, nombre, lat, lon, radio_m FROM sucursales WHERE empresa_id = ? AND activo = 1').all(Number(req.params.id)));
 });
 
+// Baja lógica: borrar dejaría checadas huérfanas y rompería el histórico.
+app.delete('/superadmin/api/empresas/:id', (req, res) => {
+  const r = db.prepare('UPDATE empresas SET activo = 0 WHERE id = ?').run(Number(req.params.id));
+  res.json({ ok: r.changes > 0 });
+});
+
+app.delete('/superadmin/api/empresas/:id/sucursales/:sid', (req, res) => {
+  const r = db.prepare('UPDATE sucursales SET activo = 0 WHERE id = ? AND empresa_id = ?')
+    .run(Number(req.params.sid), Number(req.params.id));
+  res.json({ ok: r.changes > 0 });
+});
+
 // ---------- Panel de la empresa ----------
 app.get('/:empresa/panel', authEmpresa, (req, res) => res.send(renderPanel(req.empresa)));
 

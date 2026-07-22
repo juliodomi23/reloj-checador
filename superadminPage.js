@@ -37,7 +37,7 @@ function renderSuperadmin() {
     </div>
 
     <div class="card"><h2>Empresas</h2>
-      <table><thead><tr><th>Empresa</th><th>Slug</th><th>Sucursales</th><th>Empleados</th><th>Panel</th></tr></thead>
+      <table><thead><tr><th>Empresa</th><th>Slug</th><th>Sucursales</th><th>Empleados</th><th>Panel</th><th></th></tr></thead>
       <tbody id="tabla"></tbody></table>
     </div>`;
 
@@ -51,15 +51,23 @@ function renderSuperadmin() {
       empresas=await api('/superadmin/api/empresas');
       $('resumen').textContent=empresas.length+' empresas';
       $('sempresa').innerHTML=empresas.map(x=>'<option value="'+x.id+'">'+x.nombre+'</option>').join('');
-      $('tabla').innerHTML=empresas.map(x=>'<tr><td>'+x.nombre+'</td><td><code>'+x.slug+'</code></td><td>'+x.sucursales+'</td><td>'+x.empleados+'</td><td><a href="'+BASE+'/'+x.slug+'/panel" target="_blank">abrir</a></td></tr>').join('')||'<tr><td colspan="5" class="muted">Sin empresas</td></tr>';
+      $('tabla').innerHTML=empresas.map(x=>'<tr><td>'+x.nombre+'</td><td><code>'+x.slug+'</code></td><td>'+x.sucursales+'</td><td>'+x.empleados+'</td><td><a href="'+BASE+'/'+x.slug+'/panel" target="_blank">abrir</a></td><td><button style="width:auto;padding:6px 10px;margin:0;background:#B91C1C" onclick="borrarEmpresa('+x.id+',\\''+x.nombre+'\\')">Borrar</button></td></tr>').join('')||'<tr><td colspan="6" class="muted">Sin empresas</td></tr>';
       await cargarSucursales();
+    }
+    async function borrarEmpresa(id,nombre){
+      if(!confirm('¿Borrar la empresa "'+nombre+'"? Sus checadas quedan guardadas pero deja de ser accesible.'))return;
+      try{await api('/superadmin/api/empresas/'+id,{method:'DELETE'});cargar();}catch(e){alert(e.message);}
     }
     async function cargarSucursales(){
       const id=$('sempresa').value;
       if(!id){$('sucursales').innerHTML='';return;}
       const emp=empresas.find(x=>String(x.id)===String(id));
       const subs=await api('/superadmin/api/empresas/'+id+'/sucursales');
-      $('sucursales').innerHTML=subs.length?('Sucursales de '+emp.nombre+':<br>'+subs.map(s=>s.nombre+': <a href="'+BASE+'/'+emp.slug+'/'+s.slug+'" target="_blank">'+BASE+'/'+emp.slug+'/'+s.slug+'</a>').join('<br>')):'Sin sucursales todavía';
+      $('sucursales').innerHTML=subs.length?('Sucursales de '+emp.nombre+':<br>'+subs.map(s=>s.nombre+': <a href="'+BASE+'/'+emp.slug+'/'+s.slug+'" target="_blank">'+BASE+'/'+emp.slug+'/'+s.slug+'</a> <button style="width:auto;padding:2px 8px;margin:0 0 0 6px;background:#B91C1C" onclick="borrarSucursal('+id+','+s.id+',\\''+s.nombre+'\\')">Borrar</button>').join('<br>')):'Sin sucursales todavía';
+    }
+    async function borrarSucursal(empresaId,id,nombre){
+      if(!confirm('¿Borrar la sucursal "'+nombre+'"?'))return;
+      try{await api('/superadmin/api/empresas/'+empresaId+'/sucursales/'+id,{method:'DELETE'});cargarSucursales();}catch(e){alert(e.message);}
     }
     $('sempresa').addEventListener('change',cargarSucursales);
     async function crearEmpresa(){
