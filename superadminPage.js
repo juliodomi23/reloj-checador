@@ -67,15 +67,19 @@ function renderSuperadmin() {
     const ICONO_BAD='<svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>';
     function aviso(el,t,ok){el.className='msg show '+(ok?'ok':'bad');el.innerHTML=(ok?ICONO_OK:ICONO_BAD)+'<span>'+t+'</span>';}
     async function api(u,o){const r=await fetch(u,{headers:{'Content-Type':'application/json'},...o});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Error '+r.status);return d;}
-    let empresas=[];
+    let empresas=[],sucursalesCache=[];
     async function cargar(){
       empresas=await api('/superadmin/api/empresas');
       $('resumen').textContent=empresas.length+' empresas';
-      $('sempresa').innerHTML=empresas.map(x=>'<option value="'+x.id+'">'+x.nombre+'</option>').join('');
-      $('tabla').innerHTML=empresas.map(x=>'<tr><td>'+x.nombre+'</td><td><code>'+x.slug+'</code></td><td>'+x.sucursales+'</td><td>'+x.empleados+'</td><td><a href="'+BASE+'/'+x.slug+'/panel" target="_blank">abrir</a></td><td><button class="btn-sm btn-danger" onclick="borrarEmpresa('+x.id+',\\''+x.nombre+'\\')">Borrar</button></td></tr>').join('')||'<tr><td colspan="6" class="muted">Sin empresas</td></tr>';
+      $('sempresa').innerHTML=empresas.map(x=>'<option value="'+x.id+'">'+esc(x.nombre)+'</option>').join('');
+      // Todo lo que viene de la API va por esc(): el nombre de una empresa o sucursal lo
+      // escribe el cliente en su propio panel y aquí correría con permisos de superadmin.
+      // A los onclick solo se les pasa el id; el nombre se busca en el cache al confirmar.
+      $('tabla').innerHTML=empresas.map(x=>'<tr><td>'+esc(x.nombre)+'</td><td><code>'+esc(x.slug)+'</code></td><td>'+x.sucursales+'</td><td>'+x.empleados+'</td><td><a href="'+BASE+'/'+encodeURIComponent(x.slug)+'/panel" target="_blank">abrir</a></td><td><button class="btn-sm btn-danger" onclick="borrarEmpresa('+x.id+')">Borrar</button></td></tr>').join('')||'<tr><td colspan="6" class="muted">Sin empresas</td></tr>';
       await cargarSucursales();
     }
-    async function borrarEmpresa(id,nombre){
+    async function borrarEmpresa(id){
+      const nombre=(empresas.find(x=>x.id===id)||{}).nombre||'';
       if(!confirm('¿Borrar la empresa "'+nombre+'"? Sus checadas quedan guardadas pero deja de ser accesible.'))return;
       try{await api('/superadmin/api/empresas/'+id,{method:'DELETE'});cargar();}catch(e){alert(e.message);}
     }
@@ -83,10 +87,12 @@ function renderSuperadmin() {
       const id=$('sempresa').value;
       if(!id){$('sucursales').innerHTML='';return;}
       const emp=empresas.find(x=>String(x.id)===String(id));
-      const subs=await api('/superadmin/api/empresas/'+id+'/sucursales');
-      $('sucursales').innerHTML=subs.length?('Sucursales de '+emp.nombre+':<br>'+subs.map(s=>s.nombre+': <a href="'+BASE+'/'+emp.slug+'/'+s.slug+'" target="_blank">'+BASE+'/'+emp.slug+'/'+s.slug+'</a> <button class="btn-sm btn-danger" style="margin-left:6px" onclick="borrarSucursal('+id+','+s.id+',\\''+s.nombre+'\\')">Borrar</button>').join('<br>')):'Sin sucursales todavía';
+      sucursalesCache=await api('/superadmin/api/empresas/'+id+'/sucursales');
+      const url=s=>BASE+'/'+encodeURIComponent(emp.slug)+'/'+encodeURIComponent(s.slug);
+      $('sucursales').innerHTML=sucursalesCache.length?('Sucursales de '+esc(emp.nombre)+':<br>'+sucursalesCache.map(s=>esc(s.nombre)+': <a href="'+url(s)+'" target="_blank">'+esc(url(s))+'</a> <button class="btn-sm btn-danger" style="margin-left:6px" onclick="borrarSucursal('+id+','+s.id+')">Borrar</button>').join('<br>')):'Sin sucursales todavía';
     }
-    async function borrarSucursal(empresaId,id,nombre){
+    async function borrarSucursal(empresaId,id){
+      const nombre=(sucursalesCache.find(s=>s.id===id)||{}).nombre||'';
       if(!confirm('¿Borrar la sucursal "'+nombre+'"?'))return;
       try{await api('/superadmin/api/empresas/'+empresaId+'/sucursales/'+id,{method:'DELETE'});cargarSucursales();}catch(e){alert(e.message);}
     }

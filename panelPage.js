@@ -150,12 +150,12 @@ function renderPanel(empresa) {
     }
     async function cargarSucursales(){
       const d=await api('/sucursales'); sucursalesCache=d;
-      $('tsucursales').innerHTML=d.map(s=>'<tr><td>'+s.nombre+'</td><td>'+(s.radio_m||120)+' m</td>'+
-        '<td><a href="'+location.origin+'/'+SLUG+'/'+s.slug+'" target="_blank">abrir</a></td>'+
+      $('tsucursales').innerHTML=d.map(s=>'<tr><td>'+esc(s.nombre)+'</td><td>'+(s.radio_m||120)+' m</td>'+
+        '<td><a href="'+location.origin+'/'+SLUG+'/'+encodeURIComponent(s.slug)+'" target="_blank">abrir</a></td>'+
         '<td><button class="btn-sm btn-ghost" onclick="editarSucursal('+s.id+')">Editar</button></td></tr>').join('')
         ||vacio(4,'Sin sucursales todavía. Agrega la primera abajo.');
-      $('esuc').innerHTML='<option value="">Sin asignar</option>'+d.map(s=>'<option value="'+s.id+'">'+s.nombre+'</option>').join('');
-      $('sucSeleccionar').innerHTML='<option value="">+ Nueva sucursal</option>'+d.map(s=>'<option value="'+s.id+'">'+s.nombre+'</option>').join('');
+      $('esuc').innerHTML='<option value="">Sin asignar</option>'+d.map(s=>'<option value="'+s.id+'">'+esc(s.nombre)+'</option>').join('');
+      $('sucSeleccionar').innerHTML='<option value="">+ Nueva sucursal</option>'+d.map(s=>'<option value="'+s.id+'">'+esc(s.nombre)+'</option>').join('');
       if(editandoSucId) $('sucSeleccionar').value=editandoSucId;
     }
 
@@ -171,9 +171,9 @@ function renderPanel(empresa) {
       const conHorario=d.filter(e=>e.retrasoPromedioMin!=null).sort((a,b)=>a.retrasoPromedioMin-b.retrasoPromedioMin);
       const masAsistencia=porAsistencia[0], masPuntual=conHorario[0];
       $('statTiles').innerHTML=
-        tile('Más asistencias',masAsistencia?masAsistencia.empleado+' ('+masAsistencia.entradas+')':'—')+
-        tile('Más puntual',masPuntual?masPuntual.empleado+' ('+formatoRetraso(masPuntual.retrasoPromedioMin)+')':'Sin horario configurado');
-      $('testadisticas').innerHTML=porAsistencia.map(e=>'<tr><td>'+e.empleado+'</td><td>'+e.entradas+'</td><td>'+
+        tile('Más asistencias',masAsistencia?esc(masAsistencia.empleado)+' ('+masAsistencia.entradas+')':'—')+
+        tile('Más puntual',masPuntual?esc(masPuntual.empleado)+' ('+formatoRetraso(masPuntual.retrasoPromedioMin)+')':'Sin horario configurado');
+      $('testadisticas').innerHTML=porAsistencia.map(e=>'<tr><td>'+esc(e.empleado)+'</td><td>'+e.entradas+'</td><td>'+
         (e.retrasoPromedioMin==null?'—':formatoRetraso(e.retrasoPromedioMin))+'</td><td>'+e.fueraDeArea+'</td></tr>').join('')
         ||vacio(4,'Sin checadas en este periodo');
     }
@@ -185,13 +185,13 @@ function renderPanel(empresa) {
       const sitio=c=>c.en_sitio===1?'<span class="badge badge-ok">'+ICONO_OK+'En sitio</span>'
         :c.en_sitio===0?'<span class="badge badge-bad">'+ICONO_BAD+'Fuera</span>'
         :c.tiene_foto?'<a href="/'+SLUG+'/api/checadas/'+c.id+'/foto" target="_blank">'+ICONO_FOTO+' ver foto</a>':'—';
-      $('tchecadas').innerHTML=d.map(c=>'<tr><td>'+c.empleado+'</td><td>'+c.tipo+'</td><td>'+c.created_at+'</td><td>'+sitio(c)+'</td></tr>').join('')||vacio(4,'Sin checadas');
+      $('tchecadas').innerHTML=d.map(c=>'<tr><td>'+esc(c.empleado)+'</td><td>'+esc(c.tipo)+'</td><td>'+esc(c.created_at)+'</td><td>'+sitio(c)+'</td></tr>').join('')||vacio(4,'Sin checadas');
     }
 
     // ---------- Empleados ----------
     async function cargarEmpleados(){
       const d=await api('/empleados');
-      $('templeados').innerHTML=d.map(e=>'<tr><td>'+e.nombre+'</td><td><code>'+e.pin+'</code></td><td>'+(e.sucursal_nombre||'—')+'</td><td>'+(e.activo?(e.ultimo||'—'):'baja')+'</td><td>'+
+      $('templeados').innerHTML=d.map(e=>'<tr><td>'+esc(e.nombre)+'</td><td><code>'+esc(e.pin)+'</code></td><td>'+esc(e.sucursal_nombre||'—')+'</td><td>'+(e.activo?esc(e.ultimo||'—'):'baja')+'</td><td>'+
         (e.activo?'<button class="btn-sm btn-ghost" onclick="baja('+e.id+')">Baja</button>'
                  :'<button class="btn-sm btn-danger" onclick="borrarEmpleado('+e.id+')">Borrar</button>')+'</td></tr>').join('')||vacio(5,'Sin empleados');
     }

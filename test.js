@@ -75,7 +75,27 @@ function prueba(n, fn) {
     // El !3d/!4d es el pin exacto y gana sobre el @ del centro del mapa.
     assert.deepStrictEqual(await coords('https://www.google.com/maps/place/X/@16.7,-93.1,17z/data=!3d16.7516!4d-93.1161'), { lat: 16.7516, lon: -93.1161 });
     assert.strictEqual((await get('/superadmin/api/coords', jsonSA({ texto: 'https://evil.com/a' }))).status, 400);
+    // El host se compara exacto: un regex tipo google\.[a-z.]+ deja pasar estos dos.
+    assert.strictEqual((await get('/superadmin/api/coords', jsonSA({ texto: 'https://google.com.atacante.mx/x' }))).status, 400);
+    assert.strictEqual((await get('/superadmin/api/coords', jsonSA({ texto: 'https://www.google.evil.mx/x' }))).status, 400);
+    assert.strictEqual((await get('/superadmin/api/coords', jsonSA({ texto: 'http://google.com/maps' }))).status, 400);
     assert.strictEqual((await get('/superadmin/api/coords', jsonSA({ texto: 'la esquina de siempre' }))).status, 400);
+  });
+
+  await prueba('los paneles escapan los datos antes de meterlos al HTML', async () => {
+    // El nombre de una sucursal lo escribe el cliente en su panel y el superadmin lo
+    // pinta con innerHTML: sin esc() ahí, un cliente ejecuta código como superadmin.
+    const { renderSuperadmin } = require('./superadminPage');
+    const { renderPanel } = require('./panelPage');
+    const paginas = [renderSuperadmin(), renderPanel({ id: 1, slug: 'taller-primo', nombre: 'Taller' })];
+    for (const html of paginas) {
+      assert.match(html, /function esc\(v\)/, 'falta la esc() del cliente');
+      // Campos que escribe el usuario, concatenados sin pasar por esc().
+      assert.doesNotMatch(html, /\+\s*(s|e|c|x|emp)\.(nombre|slug|empleado|pin|sucursal_nombre)\s*\+/,
+        'hay un dato del usuario metido al HTML sin esc()');
+      // El nombre dentro de un onclick: una comilla simple ya rompe el string.
+      assert.doesNotMatch(html, /onclick="[^"]*\\'/, 'onclick con texto del usuario interpolado');
+    }
   });
 
   await prueba('sin credenciales el superadmin da 401', async () => {

@@ -101,7 +101,11 @@ function layout({ titulo, acento = '#1E3A8A', body, script = '', ancho = 640 }) 
 <title>${esc(titulo)}</title>
 <style>:root{--acento:${esc(acento)};--wrap-max:${Number(ancho) || 640}px}${CSS}</style>
 </head><body><div class="wrap">${body}</div>
-${script ? `<script>${script}</script>` : ''}
+${script ? `<script>
+// Misma esc() del servidor, disponible en el cliente: los paneles arman tablas con
+// innerHTML a partir de datos que escribe el usuario (nombres de empleado y sucursal).
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+${script}</script>` : ''}
 </body></html>`;
 }
 

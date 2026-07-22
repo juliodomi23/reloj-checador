@@ -111,18 +111,24 @@ app.post('/superadmin/api/empresas/:id/sucursales', (req, res) => {
 // Saca lat/lon de un link de Google Maps (o de un "16.75, -93.11" copiado con clic derecho).
 // ponytail: en vez de un mapa embebido; si algún día se necesita mover el pin, ahí sí Leaflet.
 const RE_COORDS = /(-?\d{1,3}\.\d{4,})[,\s/@]+(-?\d{1,3}\.\d{4,})/;
-const HOST_MAPS = /^https:\/\/(maps\.app\.goo\.gl|goo\.gl|(www\.)?google\.[a-z.]+)\//;
+// Lista exacta de hosts: comparar la cadena con un regex deja pasar
+// 'google.com.atacante.mx', y este endpoint hace fetch desde dentro del VPS (SSRF).
+const HOSTS_MAPS = new Set(['maps.app.goo.gl', 'goo.gl', 'google.com', 'www.google.com', 'maps.google.com']);
+// El !3d/!4d es el pin exacto y gana sobre el @ del centro del mapa.
+const sacarCoords = t => t.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/) || t.match(RE_COORDS);
 app.post('/superadmin/api/coords', async (req, res) => {
-  let texto = String(req.body?.texto || '').trim();
-  if (/^https?:\/\//i.test(texto)) {
-    if (!HOST_MAPS.test(texto)) return res.status(400).json({ error: 'Solo links de Google Maps' });
-    // Los links cortos (Compartir) no traen coords: hay que seguir el redirect.
-    if (!RE_COORDS.test(texto)) {
-      try { texto = (await fetch(texto, { redirect: 'follow', signal: AbortSignal.timeout(5000) })).url; }
-      catch { return res.status(400).json({ error: 'No pude abrir ese link' }); }
-    }
+  const texto = String(req.body?.texto || '').trim();
+  let m = sacarCoords(texto);
+  // Los links cortos (Compartir) no traen coords: el redirect apunta a la URL larga.
+  if (!m && /^https?:\/\//i.test(texto)) {
+    let u; try { u = new URL(texto); } catch { return res.status(400).json({ error: 'Link inválido' }); }
+    if (u.protocol !== 'https:' || !HOSTS_MAPS.has(u.hostname)) return res.status(400).json({ error: 'Solo links de Google Maps' });
+    try {
+      // redirect:'manual' lee el Location sin seguirlo; seguirlo dejaría saltar a la red interna.
+      const destino = (await fetch(texto, { redirect: 'manual', signal: AbortSignal.timeout(5000) })).headers.get('location');
+      m = destino && sacarCoords(destino);
+    } catch { return res.status(400).json({ error: 'No pude abrir ese link' }); }
   }
-  const m = texto.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/) || texto.match(RE_COORDS);
   if (!m) return res.status(400).json({ error: 'No encontré coordenadas ahí' });
   res.json({ lat: Number(m[1]), lon: Number(m[2]) });
 });

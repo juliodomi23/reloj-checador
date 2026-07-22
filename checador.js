@@ -213,9 +213,9 @@ function renderChecador(suc) {
     // La foto se reduce en el cliente (máx 640 px, JPEG 0.7): ~60 KB en vez de varios MB.
     async function comprimirFoto(file){
       const img=await createImageBitmap(file);
-      const esc=Math.min(1,640/Math.max(img.width,img.height));
+      const escala=Math.min(1,640/Math.max(img.width,img.height));
       const c=document.createElement('canvas');
-      c.width=Math.round(img.width*esc); c.height=Math.round(img.height*esc);
+      c.width=Math.round(img.width*escala); c.height=Math.round(img.height*escala);
       c.getContext('2d').drawImage(img,0,0,c.width,c.height);
       return c.toDataURL('image/jpeg',0.7);
     }
