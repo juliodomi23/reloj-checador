@@ -39,13 +39,18 @@ function prueba(n, fn) {
     assert.strictEqual(evaluarSitio(suc, 16.7505, -93.11, 5), 1);
     assert.strictEqual(evaluarSitio(suc, 16.76, -93.11, 5), 0);
   });
-  await prueba('la precisión del GPS expande el radio pero con techo de 300 m', () => {
+  await prueba('la precisión del GPS expande el radio pero con tope de 200 m', () => {
     const suc = { lat: 16.75, lon: -93.11, radio_m: 120 };
     // A ~200 m: fuera con GPS preciso, dentro si el GPS trae ±100 m de error.
     assert.strictEqual(evaluarSitio(suc, 16.7518, -93.11, 5), 0);
     assert.strictEqual(evaluarSitio(suc, 16.7518, -93.11, 100), 1);
-    // A ~350 m: fuera aunque el error del GPS sea gigante (techo de 300 m).
+    // A ~350 m: fuera aunque el error del GPS sea gigante (tope de 200 m de margen).
     assert.strictEqual(evaluarSitio(suc, 16.7532, -93.11, 400), 0);
+  });
+  await prueba('el margen de GPS no se anula cuando el radio configurado ya es grande', () => {
+    // Antes: con radio_m >= 300 el margen por imprecisión quedaba en cero.
+    const suc = { lat: 16.75, lon: -93.11, radio_m: 300 };
+    assert.strictEqual(evaluarSitio(suc, 16.7532, -93.11, 150), 1, 'debería usar el margen aunque el radio ya sea de 300 m');
   });
   await prueba('aHoraLocal convierte UTC a la zona de la sucursal', () => {
     assert.strictEqual(aHoraLocal('2026-01-15 18:00:00', 'America/Mexico_City'), '2026-01-15 12:00:00');
@@ -92,10 +97,16 @@ function prueba(n, fn) {
     assert.ok(a.hora && a.hora.length >= 16, 'devuelve hora del servidor');
     const b = checar({ sucursal: suc, pin: '4821', lat: 16.7520, lon: -93.1161, precision: 8 });
     assert.strictEqual(b.tipo, 'salida');
-    // Y lejos (0.006° de lon ≈ 650 m) queda fuera del área.
-    const emp2 = db.prepare('INSERT INTO empleados (empresa_id, nombre, pin) VALUES (?, ?, ?)').run(empresaId, 'Lejano', '9090');
+  });
+
+  await prueba('con GPS confiable y fuera del área, el checado se rechaza (no solo se marca)', () => {
+    const suc = leerSucursal('taller-primo', 'centro'); // sucursal en 16.7516,-93.1161
+    db.prepare('INSERT INTO empleados (empresa_id, nombre, pin) VALUES (?, ?, ?)').run(empresaId, 'Lejano', '9090');
+    const antes = db.prepare('SELECT COUNT(*) n FROM checadas').get().n;
+    // A ~650 m (0.006° de lon), con GPS preciso: se rechaza y no se guarda nada.
     const lejos = checar({ sucursal: suc, pin: '9090', lat: 16.7516, lon: -93.11, precision: 5 });
-    assert.strictEqual(lejos.en_sitio, 0, 'debería marcar fuera del área');
+    assert.ok(lejos.error, 'debería rechazar el checado fuera del área');
+    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM checadas').get().n, antes, 'no debió insertar la checada rechazada');
   });
 
   await prueba('sin GPS válido exige selfie y la guarda como evidencia', async () => {

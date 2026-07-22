@@ -4,8 +4,10 @@ const { esc, layout } = require('./ui');
 // Radio por defecto de la geocerca. El GPS de un celular en interiores se va
 // fácil 30-50 m: este número SE AJUSTA por sucursal, no se hardcodea.
 const RADIO_DEFAULT_M = 120;
-// Techo absoluto de la geocerca: radio + margen de error del GPS nunca pasa de aquí.
-const RADIO_MAX_M = 300;
+// Tope al colchón que se le suma al radio por imprecisión del GPS. Es un tope
+// al MARGEN, no al total: así una sucursal con radio_m grande (ej. 300) sigue
+// recibiendo colchón por GPS impreciso en vez de perderlo por completo.
+const MARGEN_MAX_M = 200;
 // Con peor precisión que esto el GPS no prueba nada: se exige selfie de evidencia.
 const PRECISION_MAX_M = 500;
 // Base64 de la selfie ya comprimida en el cliente (~60 KB); 2 MB es holgura, no meta.
@@ -31,9 +33,9 @@ function evaluarSitio(suc, lat, lon, precision) {
   if (lat == null || lon == null) return null;
   const radio = Number(suc.radio_m) || RADIO_DEFAULT_M;
   // La precisión del navegador expande el radio (castigar un GPS impreciso genera
-  // falsos rechazos), pero con techo para no volver la geocerca inútil.
-  const radioEfectivo = Math.min(radio + (Number(precision) || 0), Math.max(radio, RADIO_MAX_M));
-  return distanciaM(lat, lon, suc.lat, suc.lon) <= radioEfectivo ? 1 : 0;
+  // falsos rechazos), pero con tope para no volver la geocerca inútil.
+  const margen = Math.min(Number(precision) || 0, MARGEN_MAX_M);
+  return distanciaM(lat, lon, suc.lat, suc.lon) <= radio + margen ? 1 : 0;
 }
 
 /**
@@ -81,8 +83,15 @@ function checar({ sucursal, pin, lat, lon, precision, foto }) {
     }
   }
 
-  const tipo = siguienteTipo(empleado.id);
   const en_sitio = evaluarSitio(sucursal, lat, lon, precision);
+  // Si el GPS fue lo bastante preciso para confiar en él (por eso no se pidió
+  // selfie) y confirma que está fuera de la geocerca, se rechaza de plano: no
+  // basta con marcarlo, si no cualquiera podría checar desde su casa.
+  if (!conFoto && en_sitio === 0) {
+    return { error: 'Estás fuera del área de la sucursal. Acércate e intenta de nuevo.' };
+  }
+
+  const tipo = siguienteTipo(empleado.id);
 
   // created_at explícito en UTC: no se depende del DEFAULT (una BD creada con la
   // versión vieja del esquema traía 'localtime').
@@ -183,5 +192,5 @@ function renderChecador(suc) {
 
 module.exports = {
   renderChecador, checar, distanciaM, evaluarSitio, siguienteTipo, requiereFoto,
-  RADIO_DEFAULT_M, RADIO_MAX_M, PRECISION_MAX_M, HORAS_MAX_TURNO,
+  RADIO_DEFAULT_M, MARGEN_MAX_M, PRECISION_MAX_M, HORAS_MAX_TURNO,
 };
