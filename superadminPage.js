@@ -16,35 +16,37 @@ function renderSuperadmin() {
       </div>
     </div>
 
-    <div class="card">
-      <h2><span class="badge" style="background:var(--acento);color:#fff;margin-right:8px">1</span>Alta de empresa</h2>
-      <div class="row">
-        <div><label>Slug</label><input id="cslug" placeholder="taller-primo"></div>
-        <div><label>Nombre</label><input id="cnom" placeholder="Taller El Primo"></div>
+    <div class="grid-2">
+      <div class="card">
+        <h2><span class="badge" style="background:var(--acento);color:#fff;margin-right:8px">1</span>Alta de empresa</h2>
+        <div class="row">
+          <div><label>Slug</label><input id="cslug" placeholder="taller-primo"></div>
+          <div><label>Nombre</label><input id="cnom" placeholder="Taller El Primo"></div>
+        </div>
+        <label>Contraseña del panel</label><input id="cpass" placeholder="secreta">
+        <button onclick="crearEmpresa()">Crear empresa</button>
+        <div id="mc" class="msg"></div>
       </div>
-      <label>Contraseña del panel</label><input id="cpass" placeholder="secreta">
-      <button onclick="crearEmpresa()">Crear empresa</button>
-      <div id="mc" class="msg"></div>
-    </div>
 
-    <div class="card">
-      <h2><span class="badge" style="background:var(--acento);color:#fff;margin-right:8px">2</span>Alta de sucursal</h2>
-      <p class="muted" style="margin-top:-8px">Genera la URL que se graba en la etiqueta NFC.</p>
-      <label>Empresa</label><select id="sempresa"></select>
-      <div class="row">
-        <div><label>Slug sucursal</label><input id="sslug" placeholder="centro"></div>
-        <div><label>Nombre</label><input id="snom" placeholder="Sucursal Centro"></div>
+      <div class="card">
+        <h2><span class="badge" style="background:var(--acento);color:#fff;margin-right:8px">2</span>Alta de sucursal</h2>
+        <p class="muted" style="margin-top:-8px">Genera la URL que se graba en la etiqueta NFC.</p>
+        <label>Empresa</label><select id="sempresa"></select>
+        <div class="row">
+          <div><label>Slug sucursal</label><input id="sslug" placeholder="centro"></div>
+          <div><label>Nombre</label><input id="snom" placeholder="Sucursal Centro"></div>
+        </div>
+        <div class="row">
+          <div><label>Lat</label><input id="slat" placeholder="16.7516"></div>
+          <div><label>Lon</label><input id="slon" placeholder="-93.1161"></div>
+          <div><label>Radio m</label><input id="sradio" placeholder="120"></div>
+        </div>
+        <button onclick="crearSucursal()">Crear sucursal</button>
+        <label style="margin-top:14px">URL para grabar en la etiqueta NFC</label>
+        <input id="surl" readonly placeholder="Aparece aquí al crear la sucursal">
+        <div id="ms" class="msg"></div>
+        <div id="sucursales" class="muted" style="margin-top:10px"></div>
       </div>
-      <div class="row">
-        <div><label>Lat</label><input id="slat" placeholder="16.7516"></div>
-        <div><label>Lon</label><input id="slon" placeholder="-93.1161"></div>
-        <div><label>Radio m</label><input id="sradio" placeholder="120"></div>
-      </div>
-      <button onclick="crearSucursal()">Crear sucursal</button>
-      <label style="margin-top:14px">URL para grabar en la etiqueta NFC</label>
-      <input id="surl" readonly placeholder="Aparece aquí al crear la sucursal">
-      <div id="ms" class="msg"></div>
-      <div id="sucursales" class="muted" style="margin-top:10px"></div>
     </div>
 
     <div class="card"><h2>Empresas</h2>
@@ -97,7 +99,7 @@ function renderSuperadmin() {
     }
     cargar();`;
 
-  return layout({ titulo: 'Superadmin Checador', body, script });
+  return layout({ titulo: 'Superadmin Checador', body, script, ancho: 1120 });
 }
 
 module.exports = { renderSuperadmin };

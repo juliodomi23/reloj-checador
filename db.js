@@ -29,6 +29,7 @@ db.exec(`
     lon        REAL,
     radio_m    INTEGER,
     timezone   TEXT NOT NULL DEFAULT 'America/Mexico_City',
+    hora_entrada TEXT,
     activo     INTEGER NOT NULL DEFAULT 1,
     UNIQUE (empresa_id, slug)
   );
@@ -64,6 +65,7 @@ for (const sql of [
   "ALTER TABLE sucursales ADD COLUMN timezone TEXT NOT NULL DEFAULT 'America/Mexico_City'",
   'ALTER TABLE checadas ADD COLUMN foto TEXT',
   'ALTER TABLE empleados ADD COLUMN sucursal_id INTEGER REFERENCES sucursales(id)',
+  'ALTER TABLE sucursales ADD COLUMN hora_entrada TEXT',
 ]) { try { db.exec(sql); } catch {} }
 
 /** 'YYYY-MM-DD HH:MM:SS' en UTC → misma forma en la zona horaria dada. */

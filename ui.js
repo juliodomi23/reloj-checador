@@ -16,7 +16,17 @@ const CSS = `
   }
   body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
        background:var(--bg);color:var(--text);line-height:1.5;-webkit-font-smoothing:antialiased}
-  .wrap{max-width:640px;margin:0 auto;padding:24px 20px 56px}
+  .wrap{max-width:var(--wrap-max,640px);margin:0 auto;padding:24px 20px 56px}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+  .grid-2>.card{margin-bottom:0}
+  .stat-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
+  .stat-tile{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);
+       padding:16px;box-shadow:var(--shadow)}
+  .stat-tile .valor{font-size:1.5rem;font-weight:700;letter-spacing:-.02em}
+  .stat-tile .etiqueta{color:var(--muted);font-size:.8rem;margin-top:2px}
+  @media (max-width:900px){
+    .grid-2{grid-template-columns:1fr}
+  }
   .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
         padding:22px;margin-bottom:18px;box-shadow:var(--shadow)}
   h1{font-size:1.55rem;font-weight:700;margin:0 0 4px;letter-spacing:-.01em}
@@ -82,14 +92,14 @@ const CSS = `
   }
 `;
 
-function layout({ titulo, acento = '#1E3A8A', body, script = '' }) {
+function layout({ titulo, acento = '#1E3A8A', body, script = '', ancho = 640 }) {
   return `<!doctype html>
 <html lang="es"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
 <title>${esc(titulo)}</title>
-<style>:root{--acento:${esc(acento)}}${CSS}</style>
+<style>:root{--acento:${esc(acento)};--wrap-max:${Number(ancho) || 640}px}${CSS}</style>
 </head><body><div class="wrap">${body}</div>
 ${script ? `<script>${script}</script>` : ''}
 </body></html>`;

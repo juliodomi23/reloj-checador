@@ -4,30 +4,64 @@ function renderPanel(empresa) {
   const body = `
     <div class="card"><h1>${esc(empresa.nombre)}</h1><p class="muted">Panel de asistencia</p></div>
 
+    <div class="grid-2">
+      <div class="card">
+        <h2>Sucursales</h2>
+        <div class="table-wrap">
+          <table><thead><tr><th>Nombre</th><th>Radio</th><th>Liga NFC</th><th></th></tr></thead>
+          <tbody id="tsucursales"></tbody></table>
+        </div>
+
+        <label for="sucSeleccionar" style="margin-top:16px">Viendo sucursal</label>
+        <select id="sucSeleccionar" onchange="onCambiarSeleccionSucursal()">
+          <option value="">+ Nueva sucursal</option>
+        </select>
+
+        <div class="row" style="margin-top:10px">
+          <div><label for="sucnom">Nombre</label><input id="sucnom" placeholder="Sucursal Centro"></div>
+          <div><label for="sucslug">Slug (para la URL)</label><input id="sucslug" placeholder="centro"></div>
+        </div>
+        <label for="sucradio">Radio permitido: <span id="sucradioval">120</span> m</label>
+        <input id="sucradio" type="range" min="30" max="400" step="10" value="120" style="width:100%;margin-top:6px">
+        <label for="suchora">Hora de entrada esperada (opcional, para medir puntualidad)</label>
+        <input id="suchora" type="time">
+        <label style="margin-top:12px">Toca el mapa donde está la sucursal (arrastra el punto para ajustar)</label>
+        <div id="mapaSuc" style="height:260px;border-radius:12px;overflow:hidden;background:#E2E8F0;margin-top:6px"></div>
+        <p class="muted" id="sucCoordTxt" style="margin-top:8px">Sin punto todavía. Toca el mapa.</p>
+        <button onclick="guardarSucursal()">Guardar sucursal</button>
+        <button type="button" class="btn-ghost" id="cancelarEdicion" style="display:none;margin-top:8px" onclick="cancelarEdicionSucursal()">Cancelar edición</button>
+        <div id="ms" class="msg"></div>
+      </div>
+
+      <div class="card">
+        <h2>Empleados</h2>
+        <div class="row">
+          <div><label for="enom">Nombre</label><input id="enom" placeholder="María López"></div>
+          <div><label for="epin">PIN (4-8 dígitos)</label><input id="epin" inputmode="numeric" placeholder="4821"></div>
+        </div>
+        <label for="esuc">Sucursal</label>
+        <select id="esuc"><option value="">Sin asignar</option></select>
+        <button onclick="crearEmpleado()">Agregar empleado</button>
+        <div id="me" class="msg"></div>
+        <div class="table-wrap">
+          <table><thead><tr><th>Nombre</th><th>PIN</th><th>Sucursal</th><th>Último</th><th></th></tr></thead>
+          <tbody id="templeados"></tbody></table>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
-      <h2>Sucursales</h2>
-      <div class="table-wrap">
-        <table><thead><tr><th>Nombre</th><th>Slug</th><th>Radio</th><th>Liga NFC</th><th></th></tr></thead>
-        <tbody id="tsucursales"></tbody></table>
-      </div>
-
-      <label for="sucSeleccionar" style="margin-top:16px">Viendo sucursal</label>
-      <select id="sucSeleccionar" onchange="onCambiarSeleccionSucursal()">
-        <option value="">+ Nueva sucursal</option>
+      <h2>Estadísticas de asistencia</h2>
+      <label for="diasStats">Periodo</label>
+      <select id="diasStats" onchange="cargarEstadisticas()">
+        <option value="7">7 días</option><option value="30" selected>30 días</option><option value="90">90 días</option>
       </select>
-
-      <div class="row" style="margin-top:10px">
-        <div><label for="sucnom">Nombre</label><input id="sucnom" placeholder="Sucursal Centro"></div>
-        <div><label for="sucslug">Slug (para la URL)</label><input id="sucslug" placeholder="centro"></div>
+      <div class="stat-tiles" id="statTiles" style="margin-top:16px"></div>
+      <div class="table-wrap">
+        <table><thead><tr><th>Empleado</th><th>Entradas</th><th>Puntualidad</th><th>Fuera de área</th></tr></thead>
+        <tbody id="testadisticas"></tbody></table>
       </div>
-      <label for="sucradio">Radio permitido: <span id="sucradioval">120</span> m</label>
-      <input id="sucradio" type="range" min="30" max="400" step="10" value="120" style="width:100%;margin-top:6px">
-      <label style="margin-top:12px">Toca el mapa donde está la sucursal (arrastra el punto para ajustar)</label>
-      <div id="mapaSuc" style="height:260px;border-radius:12px;overflow:hidden;background:#E2E8F0;margin-top:6px"></div>
-      <p class="muted" id="sucCoordTxt" style="margin-top:8px">Sin punto todavía. Toca el mapa.</p>
-      <button onclick="guardarSucursal()">Guardar sucursal</button>
-      <button type="button" class="btn-ghost" id="cancelarEdicion" style="display:none;margin-top:8px" onclick="cancelarEdicionSucursal()">Cancelar edición</button>
-      <div id="ms" class="msg"></div>
+      <p class="muted" style="margin-top:10px">La puntualidad se calcula contra la hora de entrada esperada de cada sucursal (configúrala arriba, en Sucursales). Sin esa hora configurada, el empleado no entra al cálculo de puntualidad.</p>
     </div>
 
     <div class="card">
@@ -50,22 +84,6 @@ function renderPanel(empresa) {
       <div class="table-wrap">
         <table><thead><tr><th>Empleado</th><th>Tipo</th><th>Fecha</th><th>Sitio</th></tr></thead>
         <tbody id="tchecadas"></tbody></table>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Empleados</h2>
-      <div class="row">
-        <div><label for="enom">Nombre</label><input id="enom" placeholder="María López"></div>
-        <div><label for="epin">PIN (4-8 dígitos)</label><input id="epin" inputmode="numeric" placeholder="4821"></div>
-      </div>
-      <label for="esuc">Sucursal</label>
-      <select id="esuc"><option value="">Sin asignar</option></select>
-      <button onclick="crearEmpleado()">Agregar empleado</button>
-      <div id="me" class="msg"></div>
-      <div class="table-wrap">
-        <table><thead><tr><th>Nombre</th><th>PIN</th><th>Sucursal</th><th>Último</th><th></th></tr></thead>
-        <tbody id="templeados"></tbody></table>
       </div>
     </div>
 
@@ -106,12 +124,13 @@ function renderPanel(empresa) {
     });
     function cancelarEdicionSucursal(){
       editandoSucId=null; $('sucnom').value=''; $('sucslug').value=''; $('sucslug').disabled=false;
-      $('cancelarEdicion').style.display='none'; $('sucSeleccionar').value='';
+      $('suchora').value=''; $('cancelarEdicion').style.display='none'; $('sucSeleccionar').value='';
     }
     window.editarSucursal=function(id){
       const s=sucursalesCache.find(x=>x.id===id); if(!s) return;
       editandoSucId=id; $('sucnom').value=s.nombre; $('sucslug').value=s.slug; $('sucslug').disabled=true;
       $('sucradio').value=s.radio_m||120; $('sucradioval').textContent=$('sucradio').value;
+      $('suchora').value=s.hora_entrada||'';
       $('cancelarEdicion').style.display='block'; $('sucSeleccionar').value=id;
       iniciarMapaSuc(s.lat,s.lon); mapaSuc.setView([s.lat,s.lon],16); ponerPunto(s.lat,s.lon);
     };
@@ -121,7 +140,8 @@ function renderPanel(empresa) {
     }
     async function guardarSucursal(){
       if(puntoLat==null){aviso($('ms'),'Toca el mapa para poner la ubicación',false);return;}
-      const body={nombre:$('sucnom').value,slug:$('sucslug').value,lat:puntoLat,lon:puntoLon,radio_m:+$('sucradio').value};
+      const body={nombre:$('sucnom').value,slug:$('sucslug').value,lat:puntoLat,lon:puntoLon,
+        radio_m:+$('sucradio').value,hora_entrada:$('suchora').value||null};
       try{
         if(editandoSucId) await api('/sucursales/'+editandoSucId,{method:'PUT',body:JSON.stringify(body)});
         else await api('/sucursales',{method:'POST',body:JSON.stringify(body)});
@@ -130,13 +150,32 @@ function renderPanel(empresa) {
     }
     async function cargarSucursales(){
       const d=await api('/sucursales'); sucursalesCache=d;
-      $('tsucursales').innerHTML=d.map(s=>'<tr><td>'+s.nombre+'</td><td><code>'+s.slug+'</code></td><td>'+(s.radio_m||120)+' m</td>'+
+      $('tsucursales').innerHTML=d.map(s=>'<tr><td>'+s.nombre+'</td><td>'+(s.radio_m||120)+' m</td>'+
         '<td><a href="'+location.origin+'/'+SLUG+'/'+s.slug+'" target="_blank">abrir</a></td>'+
         '<td><button class="btn-sm btn-ghost" onclick="editarSucursal('+s.id+')">Editar</button></td></tr>').join('')
-        ||vacio(5,'Sin sucursales todavía. Agrega la primera abajo.');
+        ||vacio(4,'Sin sucursales todavía. Agrega la primera abajo.');
       $('esuc').innerHTML='<option value="">Sin asignar</option>'+d.map(s=>'<option value="'+s.id+'">'+s.nombre+'</option>').join('');
       $('sucSeleccionar').innerHTML='<option value="">+ Nueva sucursal</option>'+d.map(s=>'<option value="'+s.id+'">'+s.nombre+'</option>').join('');
       if(editandoSucId) $('sucSeleccionar').value=editandoSucId;
+    }
+
+    // ---------- Estadísticas ----------
+    function tile(etiqueta,valor){return '<div class="stat-tile"><div class="valor">'+valor+'</div><div class="etiqueta">'+etiqueta+'</div></div>';}
+    function formatoRetraso(min){
+      if(min===0) return 'A tiempo';
+      return min>0 ? min+' min tarde' : Math.abs(min)+' min antes';
+    }
+    async function cargarEstadisticas(){
+      const d=await api('/estadisticas?dias='+$('diasStats').value);
+      const porAsistencia=[...d].sort((a,b)=>b.entradas-a.entradas);
+      const conHorario=d.filter(e=>e.retrasoPromedioMin!=null).sort((a,b)=>a.retrasoPromedioMin-b.retrasoPromedioMin);
+      const masAsistencia=porAsistencia[0], masPuntual=conHorario[0];
+      $('statTiles').innerHTML=
+        tile('Más asistencias',masAsistencia?masAsistencia.empleado+' ('+masAsistencia.entradas+')':'—')+
+        tile('Más puntual',masPuntual?masPuntual.empleado+' ('+formatoRetraso(masPuntual.retrasoPromedioMin)+')':'Sin horario configurado');
+      $('testadisticas').innerHTML=porAsistencia.map(e=>'<tr><td>'+e.empleado+'</td><td>'+e.entradas+'</td><td>'+
+        (e.retrasoPromedioMin==null?'—':formatoRetraso(e.retrasoPromedioMin))+'</td><td>'+e.fueraDeArea+'</td></tr>').join('')
+        ||vacio(4,'Sin checadas en este periodo');
     }
 
     // ---------- Asistencia ----------
@@ -173,9 +212,9 @@ function renderPanel(empresa) {
       navigator.geolocation.getCurrentPosition(p=>iniciarMapaSuc(p.coords.latitude,p.coords.longitude),porDefecto,{timeout:5000});
     }
     centrarMapaInicial();
-    cargarSucursales();cargarChecadas();cargarEmpleados();`;
+    cargarSucursales();cargarChecadas();cargarEmpleados();cargarEstadisticas();`;
 
-  return layout({ titulo: 'Panel — ' + empresa.nombre, body, script });
+  return layout({ titulo: 'Panel — ' + empresa.nombre, body, script, ancho: 1120 });
 }
 
 module.exports = { renderPanel };

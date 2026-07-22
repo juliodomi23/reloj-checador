@@ -114,6 +114,28 @@ function prueba(n, fn) {
     assert.strictEqual(lista.find(e => e.nombre === 'Juan Norte').sucursal_nombre, 'Sucursal Norte');
   });
 
+  await prueba('estadísticas: puntualidad contra la hora de entrada configurada por sucursal', async () => {
+    const auth = 'Basic ' + Buffer.from('taller-primo:demo').toString('base64');
+    const cabecera = { Authorization: auth, 'Content-Type': 'application/json' };
+    const horaMala = await get(`/taller-primo/api/sucursales/${sucursalDosId}`, { method: 'PUT', headers: cabecera, body: JSON.stringify({ lat: 16.761, lon: -93.121, hora_entrada: '25:99' }) });
+    assert.strictEqual(horaMala.status, 400, 'debería validar el formato HH:MM');
+    const ok = await get(`/taller-primo/api/sucursales/${sucursalDosId}`, { method: 'PUT', headers: cabecera, body: JSON.stringify({ lat: 16.761, lon: -93.121, radio_m: 200, hora_entrada: '09:00' }) });
+    assert.strictEqual(ok.status, 200);
+
+    const emp = db.prepare('INSERT INTO empleados (empresa_id, nombre, pin) VALUES (?, ?, ?)').run(empresaId, 'Tarde Norte', '7070');
+    const empleadoId = Number(emp.lastInsertRowid);
+    // Zona por defecto America/Mexico_City (UTC-6): 16:00 UTC = 10:00 local, 60 min tarde contra las 09:00.
+    const hoy = new Date().toISOString().slice(0, 10);
+    db.prepare(`INSERT INTO checadas (empleado_id, sucursal_id, tipo, en_sitio, created_at) VALUES (?, ?, 'entrada', 1, ?)`)
+      .run(empleadoId, sucursalDosId, `${hoy} 16:00:00`);
+
+    const stats = await (await get('/taller-primo/api/estadisticas?dias=7', { headers: { Authorization: auth } })).json();
+    const fila = stats.find(e => e.empleado === 'Tarde Norte');
+    assert.ok(fila, 'no apareció en las estadísticas');
+    assert.strictEqual(fila.entradas, 1);
+    assert.strictEqual(fila.retrasoPromedioMin, 60, 'debió calcular 60 min de retraso');
+  });
+
   await prueba('checar alterna entrada->salida y respeta la geocerca', async () => {
     const suc = leerSucursal('taller-primo', 'centro'); // sucursal en 16.7516,-93.1161
     // Empleado ~44 m de la sucursal (dentro del radio 120).

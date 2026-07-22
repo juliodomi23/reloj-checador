@@ -40,6 +40,14 @@ function authEmpresa(req, res, next) {
 function limpiarSlug(v) {
   return String(v || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
 }
+// null = "no configurada" (válido, se excluye del cálculo de puntualidad). Formato 'HH:MM'.
+function horaEntradaValida(v) {
+  return v == null || v === '' || /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
+}
+function minutosDeHora(hhmm) {
+  const [h, m] = hhmm.split(':').map(Number);
+  return h * 60 + m;
+}
 function paginaSimple(titulo, mensaje) {
   return layout({ titulo, body: `<div class="card"><h1>${esc(titulo)}</h1><p class="muted">${esc(mensaje)}</p></div>` });
 }
@@ -120,7 +128,7 @@ app.delete('/superadmin/api/empresas/:id/sucursales/:sid', (req, res) => {
 app.get('/:empresa/panel', authEmpresa, (req, res) => res.send(renderPanel(req.empresa)));
 
 app.get('/:empresa/api/sucursales', authEmpresa, (req, res) => {
-  res.json(db.prepare('SELECT id, slug, nombre, lat, lon, radio_m FROM sucursales WHERE empresa_id = ? AND activo = 1 ORDER BY nombre')
+  res.json(db.prepare('SELECT id, slug, nombre, lat, lon, radio_m, hora_entrada FROM sucursales WHERE empresa_id = ? AND activo = 1 ORDER BY nombre')
     .all(req.empresa.id));
 });
 
@@ -128,22 +136,26 @@ app.get('/:empresa/api/sucursales', authEmpresa, (req, res) => {
 // así se evita perder la geocerca por una coordenada mal tecleada.
 app.post('/:empresa/api/sucursales', authEmpresa, (req, res) => {
   const slug = limpiarSlug(req.body?.slug);
-  const { nombre, lat, lon, radio_m } = req.body || {};
+  const { nombre, lat, lon, radio_m, hora_entrada } = req.body || {};
   if (!slug || !nombre) return res.status(400).json({ error: 'slug y nombre son requeridos' });
   if (lat == null || lon == null) return res.status(400).json({ error: 'Toca el mapa para poner la ubicación' });
+  if (!horaEntradaValida(hora_entrada)) return res.status(400).json({ error: 'hora_entrada debe tener formato HH:MM' });
   try {
-    const r = db.prepare(`INSERT INTO sucursales (empresa_id, slug, nombre, lat, lon, radio_m)
-      VALUES (?, ?, ?, ?, ?, ?)`).run(req.empresa.id, slug, nombre, Number(lat), Number(lon), radio_m != null ? Number(radio_m) : null);
+    const r = db.prepare(`INSERT INTO sucursales (empresa_id, slug, nombre, lat, lon, radio_m, hora_entrada)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(req.empresa.id, slug, nombre, Number(lat), Number(lon),
+      radio_m != null ? Number(radio_m) : null, hora_entrada || null);
     res.status(201).json({ id: Number(r.lastInsertRowid), url: `/${req.empresa.slug}/${slug}` });
   } catch { res.status(409).json({ error: 'Ese slug de sucursal ya existe en tu empresa' }); }
 });
 
 app.put('/:empresa/api/sucursales/:id', authEmpresa, (req, res) => {
-  const { nombre, lat, lon, radio_m } = req.body || {};
+  const { nombre, lat, lon, radio_m, hora_entrada } = req.body || {};
   if (lat == null || lon == null) return res.status(400).json({ error: 'Toca el mapa para poner la ubicación' });
-  const r = db.prepare(`UPDATE sucursales SET lat = ?, lon = ?, radio_m = ?, nombre = COALESCE(?, nombre)
+  if (!horaEntradaValida(hora_entrada)) return res.status(400).json({ error: 'hora_entrada debe tener formato HH:MM' });
+  const r = db.prepare(`UPDATE sucursales SET lat = ?, lon = ?, radio_m = ?, hora_entrada = ?, nombre = COALESCE(?, nombre)
     WHERE id = ? AND empresa_id = ?`)
-    .run(Number(lat), Number(lon), radio_m != null ? Number(radio_m) : null, nombre || null, Number(req.params.id), req.empresa.id);
+    .run(Number(lat), Number(lon), radio_m != null ? Number(radio_m) : null, hora_entrada || null,
+      nombre || null, Number(req.params.id), req.empresa.id);
   res.json({ ok: r.changes > 0 });
 });
 
@@ -199,6 +211,41 @@ app.get('/:empresa/api/checadas', authEmpresa, (req, res) => {
     ORDER BY c.id DESC LIMIT 500
   `).all(req.empresa.id, `-${dias} days`);
   res.json(filas.map(f => ({ ...f, created_at: aHoraLocal(f.created_at, f.timezone) })));
+});
+
+// Ranking por empleado: asistencias, puntualidad (contra la hora de entrada
+// configurada por sucursal) y qué tan seguido checan fuera del área.
+app.get('/:empresa/api/estadisticas', authEmpresa, (req, res) => {
+  const dias = Math.min(Math.max(Number(req.query.dias) || 30, 1), 90);
+  const filas = db.prepare(`
+    SELECT c.empleado_id, e.nombre AS empleado, c.created_at, c.en_sitio, s.timezone, s.hora_entrada
+    FROM checadas c
+    JOIN empleados e ON e.id = c.empleado_id
+    JOIN sucursales s ON s.id = c.sucursal_id
+    WHERE e.empresa_id = ? AND c.tipo = 'entrada' AND c.created_at >= datetime('now', ?)
+  `).all(req.empresa.id, `-${dias} days`);
+
+  const porEmpleado = new Map();
+  for (const f of filas) {
+    let e = porEmpleado.get(f.empleado_id);
+    if (!e) {
+      e = { empleado: f.empleado, entradas: 0, fueraDeArea: 0, sumaRetrasoMin: 0, conHorario: 0 };
+      porEmpleado.set(f.empleado_id, e);
+    }
+    e.entradas++;
+    if (f.en_sitio === 0) e.fueraDeArea++;
+    if (f.hora_entrada) {
+      const horaLocal = aHoraLocal(f.created_at, f.timezone).slice(11, 16);
+      e.sumaRetrasoMin += minutosDeHora(horaLocal) - minutosDeHora(f.hora_entrada);
+      e.conHorario++;
+    }
+  }
+  res.json([...porEmpleado.values()].map(e => ({
+    empleado: e.empleado,
+    entradas: e.entradas,
+    fueraDeArea: e.fueraDeArea,
+    retrasoPromedioMin: e.conHorario ? Math.round(e.sumaRetrasoMin / e.conHorario) : null,
+  })));
 });
 
 // Evidencia fotográfica de una checada sin GPS válido.
