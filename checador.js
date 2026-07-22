@@ -111,6 +111,7 @@ function checar({ sucursal, pin, lat, lon, precision, foto }) {
 
 // ---------- Página que ve el empleado ----------
 function renderChecador(suc) {
+  const hayGeocerca = suc.lat != null && suc.lon != null;
   const body = `
     <div class="card" style="text-align:center">
       <div style="width:52px;height:52px;border-radius:14px;background:var(--acento);
@@ -123,25 +124,20 @@ function renderChecador(suc) {
       <p class="muted">${esc(suc.nombre)}</p>
     </div>
 
+    ${hayGeocerca ? `
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <div class="card">
+      <h2>Tu ubicación</h2>
+      <div id="mapa" style="height:220px;border-radius:12px;overflow:hidden;background:#E2E8F0"></div>
+      <p class="muted" id="distTxt" style="margin-top:10px">Buscando tu ubicación…</p>
+    </div>` : ''}
+
     <div class="card">
       <form id="f" autocomplete="off">
         <label for="pin">Tu PIN</label>
         <input id="pin" name="pin" type="text" inputmode="numeric" pattern="[0-9]*"
                maxlength="8" required autofocus autocomplete="off" placeholder="••••"
                style="font-size:1.9rem;letter-spacing:.4em;text-align:center;font-weight:700;padding:16px 13px">
-
-        <div id="teclado" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px">
-          ${['1','2','3','4','5','6','7','8','9','borrar','0','limpiar'].map(k => {
-            if (k === 'borrar') return `<button type="button" class="btn-ghost" data-tecla="borrar" aria-label="Borrar dígito"
-                 style="margin-top:0;min-height:52px">
-                 <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
-                   <path d="M21 4H8l-6 8 6 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"></path><path d="M13 9l6 6M19 9l-6 6"></path>
-                 </svg></button>`;
-            if (k === 'limpiar') return `<button type="button" class="btn-ghost" data-tecla="limpiar" aria-label="Borrar todo"
-                 style="margin-top:0;min-height:52px;font-size:.8rem;font-weight:700">C</button>`;
-            return `<button type="button" class="btn-ghost" data-tecla="${k}" style="margin-top:0;min-height:52px;font-size:1.3rem;font-weight:700">${k}</button>`;
-          }).join('')}
-        </div>
 
         <div id="df" style="display:none">
           <label for="foto">Selfie de evidencia</label>
@@ -157,26 +153,53 @@ function renderChecador(suc) {
       </form>
       <div id="m" class="msg"></div>
       <p class="muted" style="margin-top:16px;text-align:center">Se registra tu ubicación al momento de checar.</p>
-    </div>`;
+    </div>
+    ${hayGeocerca ? '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>' : ''}`;
 
   const script = `
-    const HAY_GEOCERCA=${suc.lat != null && suc.lon != null};
+    const HAY_GEOCERCA=${hayGeocerca};
+    const SUC_LAT=${hayGeocerca ? suc.lat : 'null'}, SUC_LON=${hayGeocerca ? suc.lon : 'null'},
+          SUC_RADIO=${hayGeocerca ? (Number(suc.radio_m) || RADIO_DEFAULT_M) : 'null'};
     const f=document.getElementById('f'),b=document.getElementById('b'),m=document.getElementById('m'),
           df=document.getElementById('df'),foto=document.getElementById('foto'),pinEl=document.getElementById('pin');
-    document.getElementById('teclado').addEventListener('click',e=>{
-      const t=e.target.closest('[data-tecla]'); if(!t) return;
-      const k=t.dataset.tecla;
-      if(k==='limpiar') pinEl.value='';
-      else if(k==='borrar') pinEl.value=pinEl.value.slice(0,-1);
-      else if(pinEl.value.length<8) pinEl.value+=k;
-      pinEl.focus();
-    });
+    function distanciaClienteM(lat1,lon1,lat2,lon2){
+      const R=6371000,rad=g=>g*Math.PI/180;
+      const dLat=rad(lat2-lat1),dLon=rad(lon2-lon1);
+      const a=Math.sin(dLat/2)**2+Math.cos(rad(lat1))*Math.cos(rad(lat2))*Math.sin(dLon/2)**2;
+      return 2*R*Math.asin(Math.sqrt(a));
+    }
+    let mapa, marcadorCelular;
+    function iniciarMapa(){
+      if(!HAY_GEOCERCA || mapa || typeof L==='undefined') return;
+      mapa=L.map('mapa',{zoomControl:false,attributionControl:false}).setView([SUC_LAT,SUC_LON],17);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(mapa);
+      L.circle([SUC_LAT,SUC_LON],{radius:SUC_RADIO,color:'#0891B2',fillColor:'#0891B2',fillOpacity:.15}).addTo(mapa);
+      L.circleMarker([SUC_LAT,SUC_LON],{radius:7,color:'#0891B2',fillColor:'#0891B2',fillOpacity:1})
+        .addTo(mapa).bindTooltip('Área de la sucursal');
+    }
+    function mostrarCelularEnMapa(lat,lon){
+      if(!mapa) return;
+      if(marcadorCelular) marcadorCelular.setLatLng([lat,lon]);
+      else marcadorCelular=L.circleMarker([lat,lon],{radius:7,color:'#22C55E',fillColor:'#22C55E',fillOpacity:1})
+        .addTo(mapa).bindTooltip('Tu celular');
+      mapa.fitBounds(L.latLngBounds([[SUC_LAT,SUC_LON],[lat,lon]]).pad(0.4));
+      const d=Math.round(distanciaClienteM(lat,lon,SUC_LAT,SUC_LON));
+      document.getElementById('distTxt').textContent=
+        'Estás a '+d+' m de la sucursal (radio permitido: '+SUC_RADIO+' m).';
+    }
     function ubicacion(){
       return new Promise(r=>{
         if(!navigator.geolocation) return r({});
         navigator.geolocation.getCurrentPosition(
           p=>r({lat:p.coords.latitude,lon:p.coords.longitude,precision:p.coords.accuracy}),
           ()=>r({}), {enableHighAccuracy:true,timeout:8000,maximumAge:0});
+      });
+    }
+    if(HAY_GEOCERCA){
+      iniciarMapa();
+      ubicacion().then(geo=>{
+        if(geo.lat==null) { document.getElementById('distTxt').textContent='No pudimos leer tu ubicación (permiso denegado o sin señal).'; return; }
+        mostrarCelularEnMapa(geo.lat,geo.lon);
       });
     }
     // La foto se reduce en el cliente (máx 640 px, JPEG 0.7): ~60 KB en vez de varios MB.
@@ -201,6 +224,7 @@ function renderChecador(suc) {
       e.preventDefault(); b.disabled=true; textoBoton('Registrando…'); m.className='msg';
       try{
         const geo=await ubicacion();
+        if(geo.lat!=null) mostrarCelularEnMapa(geo.lat,geo.lon);
         // Sin lectura GPS o con precisión peor a 500 m no se puede verificar la
         // geocerca: se exige selfie de evidencia.
         const necesitaFoto=HAY_GEOCERCA&&(geo.lat==null||geo.precision>500);
